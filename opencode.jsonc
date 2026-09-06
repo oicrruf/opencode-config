@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": "allow",
+  "model": "minimax/MiniMax-M3",
+  "small_model": "minimax/MiniMax-M2.7-highspeed",
+  "default_agent": "build",
+  "autoupdate": "notify",
+  "lsp": true,
+  "compaction": { "auto": true },
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:CONTEXT7_API_KEY}"
+      }
+    },
+    "serena": {
+      "type": "local",
+      "command": ["serena", "start-mcp-server", "--project", ".", "--transport", "stdio"],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp",
+        "--browser",
+        "chromium"
+      ],
+      "enabled": true
+    }
+  }
+}
