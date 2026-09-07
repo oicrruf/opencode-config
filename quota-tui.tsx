@@ -28,10 +28,25 @@ type CodexWindow = {
   windowDurationMins?: number | null
 }
 
+type CodexIndividualLimit = {
+  limit?: string
+  used?: string | number
+  remainingPercent?: number
+  resetsAt?: number | null
+}
+
+type CodexCredits = {
+  hasCredits?: boolean
+  unlimited?: boolean
+  balance?: string | null
+}
+
 type CodexQuota = {
   rateLimits?: {
     primary?: CodexWindow | null
     secondary?: CodexWindow | null
+    individualLimit?: CodexIndividualLimit | null
+    credits?: CodexCredits | null
   }
 }
 
@@ -189,17 +204,33 @@ async function readCodex(signal: AbortSignal) {
         : undefined
     }
 
+    const individual = response?.result?.rateLimits?.individualLimit
+    const individualRemaining =
+      typeof individual?.remainingPercent === "number"
+        ? Math.max(0, Math.min(100, individual.remainingPercent))
+        : undefined
+
     const primary = response?.result?.rateLimits?.primary
     const secondary = response?.result?.rateLimits?.secondary
     const primaryRemaining = remaining(primary)
     const secondaryRemaining = remaining(secondary)
-    if (primaryRemaining === undefined && secondaryRemaining === undefined) return undefined
+
+    if (
+      individualRemaining === undefined &&
+      primaryRemaining === undefined &&
+      secondaryRemaining === undefined
+    ) {
+      return undefined
+    }
 
     const parts: string[] = []
+    if (individualRemaining !== undefined) {
+      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}`)
+    }
     if (primaryRemaining !== undefined) {
       const window = primary?.windowDurationMins
       const label = typeof window === "number" ? `${window / 60}h` : "5h"
-      parts.push(`󰚩 Codex ${label} ${quotaBar(primaryRemaining)}`)
+      parts.push(`${label} ${quotaBar(primaryRemaining)}`)
     }
     if (secondaryRemaining !== undefined) parts.push(`sem ${quotaBar(secondaryRemaining)}`)
     return parts.join("  ")
