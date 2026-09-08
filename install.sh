@@ -24,7 +24,10 @@ link "$repo_dir/agent" "$config_dir/agents"
 link "$repo_dir/commands" "$config_dir/commands"
 link "$repo_dir/skills" "$config_dir/skills"
 link "$repo_dir/tui.jsonc" "$config_dir/tui.jsonc"
-link "$repo_dir/plugins/autonomy.js" "$config_dir/plugins/autonomy.js"
 link "$repo_dir/plugins/herdr-agent-state.js" "$config_dir/plugins/herdr-agent-state.js"
+
+if [ -L "$config_dir/plugins/autonomy.js" ]; then
+  rm "$config_dir/plugins/autonomy.js"
+fi
 
 printf 'OpenCode configuration linked from %s\n' "$repo_dir"
