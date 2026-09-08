@@ -13,6 +13,7 @@ editing product code.
 You may create or update only:
 
 - OpenSpec initialization files produced by the `openspec` CLI.
+- `.codegraph/` indexes produced by the `codegraph` CLI.
 - `AGENTS.md`.
 - `.opencode/agents/*.md`.
 - `.opencode/opencode.json` or `.opencode/opencode.jsonc` when a project-level
@@ -29,17 +30,30 @@ enable MCP servers, add credentials, or change product code.
    use the current workspace root supported by manifests and configuration. In
    a monorepo, identify its packages and shared tooling before deciding whether
    specialists belong at the root or in a package.
-2. Read the global OpenCode setup available under `~/.config/opencode`, then
+2. Ensure CodeGraph is available before broad code discovery by running
+   `codegraph --version`. If that check fails, report the missing or broken
+   prerequisite and continue with built-in search; never install it silently.
+   If the resolved root has no `.codegraph/` index, run
+   `CODEGRAPH_TELEMETRY=0 codegraph init --yes` there. If an index exists, run
+   `CODEGRAPH_TELEMETRY=0 codegraph status` and let the MCP watcher reconcile
+   normal source changes. Keep telemetry disabled for every CLI invocation.
+   Use the CodeGraph MCP when it exposed tools at session start, otherwise use
+   its CLI after creating the index. Use CodeGraph first for architecture,
+   symbol relationships, call paths, and impact; corroborate configuration and
+   non-code claims from their source files. Track whether the index was
+   `created`, `existing`, or `unavailable`; a newly created index becomes
+   available through MCP after OpenCode restarts.
+3. Read the global OpenCode setup available under `~/.config/opencode`, then
    read project-local `AGENTS.md`, `.opencode/`, OpenSpec files, manifests,
    lockfiles, source layout, tests, CI, container, deployment, database, and
    documentation files. Search broadly first and read representative files;
    do not ingest generated output, dependencies, binaries, secrets, or every
    source file without a reason.
-3. Build an evidence-based architecture map: languages, runtimes, frameworks,
+4. Build an evidence-based architecture map: languages, runtimes, frameworks,
    package manager, application layers, boundaries, data stores, external
    integrations, build system, test tools, CI/CD, deployment, and important
    conventions. Mark uncertain claims as unknown rather than guessing.
-4. Ensure this project has its own OpenSpec root. Run
+5. Ensure this project has its own OpenSpec root. Run
    `openspec context --json` from the resolved root and compare the returned
    root with it so an ancestor OpenSpec installation is not mistaken for this
    project's setup. If the project itself is not initialized, run
@@ -47,20 +61,21 @@ enable MCP servers, add credentials, or change product code.
    as the working directory. If it is initialized, run `openspec update .` only
    when generated OpenCode instructions are missing or stale. Do not use
    `--force` unless required and explain why.
-5. Create the smallest useful set of project specialists in
+6. Create the smallest useful set of project specialists in
    `.opencode/agents/`. Reuse the global `frontend`, `backend`, `qa`, and
    `adversarial` agents whenever their defaults are sufficient. Create a local
    specialist only when it can cite both a stack-defining manifest or config
    and representative project code, and it owns at least one convention,
    command, risk, or boundary not covered by a global agent. Otherwise use the
    global agent.
-6. Create or update `AGENTS.md` as the project's coordination contract. Keep it
+7. Create or update `AGENTS.md` as the project's coordination contract. Keep it
    concise and include observed architecture, authoritative commands,
-   conventions, generated specialist routing, and the OpenSpec policy below.
-7. Create `.opencode/opencode.jsonc` only when agent routing or another local
+   conventions, generated specialist routing, the code-intelligence policy,
+   and the OpenSpec policy below.
+8. Create `.opencode/opencode.jsonc` only when agent routing or another local
    override cannot be expressed by discovered agent files or `AGENTS.md`.
    Preserve existing fields and include the OpenCode schema URL.
-8. Re-read every changed file and validate any OpenCode JSON/JSONC against
+9. Re-read every changed file and validate any OpenCode JSON/JSONC against
    `https://opencode.ai/config.json`. Verification is limited to parsing and
    validating generated configuration and confirming expected files are
    discoverable. Do not run product lint, tests, builds, migrations, or deploys
@@ -77,6 +92,7 @@ Every generated specialist must state:
 - Evidence and files that define its stack and scope.
 - What it owns and what it routes to another agent.
 - Project commands and conventions it must follow.
+- The CodeGraph-first and Serena-on-refactor policy below.
 - How it participates in the OpenSpec workflow.
 - Its concise report format and verification responsibilities.
 
@@ -84,6 +100,25 @@ Project specialists are subagents. They receive bounded tasks from `build` or
 another global role and return changed files, verification results, blockers,
 and any OpenSpec task impact. They must not create a competing orchestration
 flow.
+
+## Code intelligence policy
+
+CodeGraph is the default code-intelligence layer for every initialized
+project. Record in `AGENTS.md` and every generated specialist that agents must
+query CodeGraph before filesystem-wide search when locating symbols, tracing
+flows, understanding architecture, or estimating change impact. Built-in
+`glob`, `grep`, and `read` remain the fallback for unindexed files,
+configuration, documentation, or a missing/stale result. Do not duplicate a
+successful graph query with broad searches.
+
+Serena is not a discovery tool in this setup. Agents may call Serena only after
+the task has been identified as a behavior-preserving refactor and a semantic
+operation provides concrete safety, such as cross-file symbol rename,
+reference-aware replacement, or safe deletion. Serena starts without an active
+project: activate the current project through Serena only after this gate
+passes. Use CodeGraph first to establish the impact boundary, then Serena for
+that semantic operation. Features, bug fixes, reviews, routine edits, and
+architecture discovery use CodeGraph plus normal OpenCode tools, not Serena.
 
 ## OpenSpec policy
 
@@ -122,6 +157,8 @@ Finish with:
 
 - Detected architecture and confidence gaps.
 - OpenSpec status.
+- CodeGraph index status: `created`, `existing`, or `unavailable`, plus whether
+  an OpenCode restart is needed to expose a new index through MCP.
 - Files created or updated.
 - Specialists created and their routing.
 - Skills and MCPs already suitable.

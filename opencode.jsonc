@@ -18,6 +18,14 @@
     "qa": { "model": "minimax/MiniMax-M3" }
   },
   "mcp": {
+    "codegraph": {
+      "type": "local",
+      "command": ["codegraph", "serve", "--mcp"],
+      "enabled": true,
+      "environment": {
+        "CODEGRAPH_TELEMETRY": "0"
+      }
+    },
     "context7": {
       "type": "remote",
       "url": "https://mcp.context7.com/mcp",
@@ -28,7 +36,7 @@
     },
     "serena": {
       "type": "local",
-      "command": ["serena", "start-mcp-server", "--project", ".", "--transport", "stdio"],
+      "command": ["serena", "start-mcp-server", "--transport", "stdio"],
       "enabled": true
     },
     "playwright": {
