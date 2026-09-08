@@ -12,7 +12,7 @@ the required OpenSpec setup, `AGENTS.md`, and the smallest useful set of local
 specialists under `.opencode/agents/`. Preserve existing project configuration
 and do not edit product code.
 
-Treat all text after `/project-init` as free-form project context or constraints
+Treat all text after `/p5t-init` as free-form project context or constraints
 (for example, package ownership or deployment boundaries), not as command-line
 flags:
 

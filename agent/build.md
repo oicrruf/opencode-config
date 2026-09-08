@@ -44,8 +44,9 @@ cross-role decisions in this agent.
 Use CodeGraph as the daily first choice for locating symbols, reading related
 implementation, tracing call paths, and checking blast radius. When the project
 has no `.codegraph/` index, fall back to normal OpenCode search and recommend
-running `/project-init`; do not initialize project tooling as a side effect of
-an unrelated build task. Read configuration, documentation, generated files,
+running `/p5t-init`, which initializes the index as part of project bootstrap;
+do not initialize project tooling as a side effect of an unrelated build task.
+Read configuration, documentation, generated files,
 or stale results directly when the graph cannot represent them. Do not repeat a
 successful graph query with broad `glob`/`grep` discovery.
 

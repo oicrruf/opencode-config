@@ -1,5 +1,5 @@
 ---
-description: Project bootstrap architect - detects the technological stack, initializes OpenSpec, and creates project-specific OpenCode agents and coordination instructions. Use through /project-init when preparing or refreshing a project's AI configuration.
+description: Project bootstrap architect - detects the technological stack, initializes OpenSpec, and creates project-specific OpenCode agents and coordination instructions. Use through /p5t-init when preparing or refreshing a project's AI configuration.
 mode: subagent
 model: openai/gpt-5.6-terra
 ---
