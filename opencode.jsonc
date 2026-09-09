@@ -10,12 +10,28 @@
   "agent": {
     "plan": { "model": "openai/gpt-5.6-terra" },
     "explore": { "model": "openai/gpt-5.6-terra" },
-    "adversarial": { "model": "openai/gpt-5.6-terra" },
-    "build": { "model": "minimax/MiniMax-M3" },
+    "adversarial": {
+      "model": "openai/gpt-5.6-terra",
+      "tools": { "serena*": true, "playwright_*": true }
+    },
+    "build": {
+      "model": "minimax/MiniMax-M3",
+      "tools": { "serena*": true }
+    },
     "general": { "model": "minimax/MiniMax-M3" },
-    "frontend": { "model": "minimax/MiniMax-M3" },
+    "frontend": {
+      "model": "minimax/MiniMax-M3",
+      "tools": { "playwright_*": true }
+    },
     "backend": { "model": "minimax/MiniMax-M3" },
-    "qa": { "model": "minimax/MiniMax-M3" }
+    "qa": {
+      "model": "minimax/MiniMax-M3",
+      "tools": { "playwright_*": true }
+    }
+  },
+  "tools": {
+    "serena*": false,
+    "playwright_*": false
   },
   "mcp": {
     "codegraph": {
