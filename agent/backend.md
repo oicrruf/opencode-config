@@ -61,9 +61,6 @@ Load these when the work matches their scope:
 - **`code-review`** — when polishing your own work before commit.
 - **`dedupe`** — when scanning for duplicated logic, query patterns, or
   helper functions that could be extracted.
-- **`cavecrew`** — for delegation when working in main context. Prefer
-  `cavecrew-investigator` (locate symbols), `cavecrew-builder` (1–2 file
-  edits), `cavecrew-reviewer` (diff audit). Cheaper than vanilla agents.
 - **`investigate-first`** — diagnose before editing. Rank hypotheses by
   evidence; do not edit until a credible mechanism explains the symptom.
 - **`surgical-patch`** — when applying a minimal fix; change narrowest layer
@@ -72,4 +69,3 @@ Load these when the work matches their scope:
   and verify before/after.
 - **`verify-and-stop`** — when acceptance proof passes, stop. Reuse
   current results, do not add polish.
-- **`caveman-review`** — when producing code review findings for the user.

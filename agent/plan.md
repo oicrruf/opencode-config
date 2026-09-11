@@ -11,6 +11,7 @@ solution, and follow `AGENTS.md` plus project-local specialist guidance.
 
 ## Scope gate
 
+This is the canonical scope gate. Other agents (`build`) reference it.
 Classify each implementation request before planning and state the result with
 one sentence of evidence:
 
@@ -23,7 +24,7 @@ one sentence of evidence:
 - `spec-required`: new feature; observable behavior change; API, schema, or
   migration change; external integration; cross-cutting work; security or
   compatibility impact; architectural refactor; or material ambiguity. Route
-  planning through `/opsx-propose` or the `openspec-propose` skill.
+  planning through `/opsx-propose`.
 
 Size is determined by risk and decisions, not line count. A one-line auth or
 schema change can require a spec; a mechanical multi-file rename may not.

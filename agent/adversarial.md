@@ -1,5 +1,5 @@
 ---
-description: Global adversarial reviewer — read-only audit of code, config, content, and other agents' work. Use before commits, before deploys, when the user says "revisa", "verifica los cambios", "esto no rompe nada?", or after any batch of edits. Finds security flaws (OWASP top 10), broken assumptions, edge cases, perf regressions, a11y gaps, i18n violations. Read-only on code/config; may edit AGENTS.md and `.opencode/agents/*.md` when a finding implies a safer or better convention.
+description: Adversarial reviewer. Read-only audit of code, config, content. Finds security flaws, broken assumptions, edge cases, perf regressions, a11y gaps. Use for "revisa", "verifica los cambios", before commits, before deploys.
 mode: subagent
 model: minimax/MiniMax-M2.7-highspeed
 ---
@@ -78,9 +78,6 @@ Load these when the work matches their scope:
   or root-cause analysis (intermittent failures, race conditions, performance
   regressions). Apply the reproduce → isolate → hypothesize → instrument →
   fix → verify loop.
-- **`caveman-review`** — when summarizing findings to the user; one line per
-  finding: location, problem, fix. Use severity prefixes (🔴 bug, 🟡 risk,
-  🔵 nit, ❓ q) when mixed.
 - **`investigate-first`** — diagnose before recommending. Separate observed
   symptom from inferred cause; rank hypotheses by evidence.
 - **`verify-and-stop`** — when the audit hits its acceptance gate, stop. Do

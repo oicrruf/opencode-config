@@ -63,5 +63,3 @@ Load these when the work matches their scope:
   size, error handling, dead code) tagged with severity.
 - **`verify-and-stop`** — when acceptance criteria pass, stop. Distinguish
   pass / fail / unavailable / blocked exactly; do not expand scope.
-- **`caveman-review`** — when summarizing findings for the user; one-line
-  per finding format.

@@ -12,13 +12,17 @@
     "explore": { "model": "openai/gpt-5.6-terra" },
     "adversarial": {
       "model": "openai/gpt-5.6-terra",
-      "tools": { "serena*": true, "playwright_*": true }
+      "permission": { "edit": "deny", "bash": "deny" },
+      "tools": { "serena*": true, "playwright_*": true, "context7_*": true }
     },
     "build": {
       "model": "minimax/MiniMax-M3",
-      "tools": { "serena*": true }
+      "tools": { "serena*": true, "context7_*": true }
     },
-    "general": { "model": "minimax/MiniMax-M3" },
+    "general": {
+      "model": "minimax/MiniMax-M3",
+      "tools": { "context7_*": true }
+    },
     "frontend": {
       "model": "minimax/MiniMax-M3",
       "tools": { "playwright_*": true }
@@ -26,12 +30,14 @@
     "backend": { "model": "minimax/MiniMax-M3" },
     "qa": {
       "model": "minimax/MiniMax-M3",
+      "permission": { "edit": "deny", "bash": "deny" },
       "tools": { "playwright_*": true }
     }
   },
   "tools": {
     "serena*": false,
-    "playwright_*": false
+    "playwright_*": false,
+    "context7_*": false
   },
   "mcp": {
     "codegraph": {

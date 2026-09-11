@@ -52,8 +52,6 @@ Load these when the work matches their scope:
   for forms, modals, navigation, loading/error/empty states.
 - **`code-review`** — when polishing your own work before commit.
 - **`dedupe`** — when scanning for duplicated markup, CSS, or components.
-- **`caveman-review`** — when producing code review findings for the user;
-  one-line format `L<line>: <problem>. <fix>.`.
 - **`surgical-patch`** — when applying a minimal fix; change narrowest layer,
   no cleanup outside fix.
 - **`verify-and-stop`** — when acceptance proof passes, stop. Do not add polish.
