@@ -9,8 +9,8 @@
 
 ## 3. Reset indicator helper
 
-- [x] 3.1 Add a module-level `resetLabel(resetsAt?: number | null): string` helper that decomposes the distance into days/hours/minutes, omits zero components, and uses `·` (U+00B7) as the days-to-sub-day separator; verify by tracing each spec scenario for "Reset date indicator after codex label" against the helper output
-- [x] 3.2 Append `resetLabel(individual?.resetsAt)` after the plan badge in the same `parts.push` line; verify the assembled string matches the expected `Codex <bar> 󰃖 reset 18d` shape on a real codex response (the existing 2026-10-01 reset will exercise the days-only branch)
+- [x] 3.1 Add a module-level `resetLabel(resetsAt?: number | null): string` helper that returns ` {d}d` for any distance >= 24h and ` {h}h`, ` {m}m`, or ` {h}h {m}m` for sub-day distances, with no leading word and no separator character; verify by tracing each spec scenario for "Reset indicator immediately after codex bar" against the helper output
+- [x] 3.2 Append `resetLabel(individual?.resetsAt)` immediately after the codex bar (before the plan badge) in the same `parts.push` line; verify the assembled string matches `Codex <bar> 18d 󰃖` on the user's current codex response
 
 ## 4. Spec verification
 

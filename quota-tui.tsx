@@ -140,15 +140,13 @@ function resetLabel(resetsAt?: number | null): string {
   if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
   const totalSeconds = Math.max(0, resetsAt - Math.floor(Date.now() / 1000))
   if (totalSeconds === 0) return ""
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  if (totalSeconds >= 86400) return ` ${Math.floor(totalSeconds / 86400)}d`
+  const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const subDay: string[] = []
   if (hours > 0) subDay.push(`${hours}h`)
   if (minutes > 0) subDay.push(`${minutes}m`)
-  if (days > 0 && subDay.length > 0) return ` reset ${days}d · ${subDay.join(" ")}`
-  if (days > 0) return ` reset ${days}d`
-  if (subDay.length > 0) return ` reset ${subDay.join(" ")}`
+  if (subDay.length > 0) return ` ${subDay.join(" ")}`
   return ""
 }
 
@@ -260,9 +258,9 @@ async function readCodex(
 
     const parts: string[] = []
     if (individualRemaining !== undefined) {
-      const badge = planBadge(response?.result?.planType)
       const reset = resetLabel(individual?.resetsAt)
-      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}${badge}${reset}`)
+      const badge = planBadge(response?.result?.planType)
+      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}${reset}${badge}`)
     }
     if (primaryRemaining !== undefined) {
       const window = primary?.windowDurationMins

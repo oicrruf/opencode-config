@@ -66,70 +66,81 @@ badge.
 - Hardcoded icon per plan in a switch — verbose for a two-icon feature
   and obscures the fallback rule.
 
-### Reset formatter decomposes into days / hours / minutes
+### Reset formatter: days above the day boundary, hours/minutes below
 
-**Choice:** compute the three components from the seconds distance and
-render only the non-zero ones, with `·` (U+00B7) as the days-to-sub-day
-separator:
+**Choice:** branch on the day boundary. At or above one day, render
+days only; below one day, render hours and/or minutes only. No
+multi-scale output, so no separator character is ever needed:
 
 ```ts
 function resetLabel(resetsAt?: number | null): string {
   if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
   const totalSeconds = Math.max(0, resetsAt - Math.floor(Date.now() / 1000))
   if (totalSeconds === 0) return ""
-  const days = Math.floor(totalSeconds / 86400)
-  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  if (totalSeconds >= 86400) return ` ${Math.floor(totalSeconds / 86400)}d`
+  const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
-  if (days > 0 && (hours > 0 || minutes > 0)) return ` reset ${days}d · ${hours}h ${minutes}m`
-  if (days > 0) return ` reset ${days}d`
-  if (hours > 0 && minutes > 0) return ` reset ${hours}h ${minutes}m`
-  if (hours > 0) return ` reset ${hours}h`
-  if (minutes > 0) return ` reset ${minutes}m`
+  const subDay: string[] = []
+  if (hours > 0) subDay.push(`${hours}h`)
+  if (minutes > 0) subDay.push(`${minutes}m`)
+  if (subDay.length > 0) return ` ${subDay.join(" ")}`
   return ""
 }
 ```
 
-**Rationale:** the user requested a uniform decomposed format where
-the largest non-zero unit is the primary display and smaller units are
-shown only when present. `·` separates the day scale from the sub-day
-scale (days + hours/minutes); within sub-day units, a single space is
-used (no `·`). The `Math.max(0, ...)` clamp plus the `totalSeconds === 0`
-early return cover the clock-skew window where `resetsAt` is briefly in
-the past; the indicator hides in that window rather than rendering
-` reset 0m`.
+**Rationale:** the user wants compact indicators at every horizon —
+hours/minutes for sub-day windows (relevant for short-window providers
+like minimax's 5h cycle and codex's sub-day quota if any), days only
+for windows of one day or more (where hour granularity becomes noise
+on long windows like the user's 18-day business quota). The day
+boundary is the natural split: at and above it, hour granularity is
+not informative; below it, day granularity is not informative.
+
+The single space between hours and minutes (within the sub-day case)
+matches the typographic style already used between the bar's segments
+(`█░`) and between percentage components. The `Math.max(0, ...)` clamp
+plus the `totalSeconds === 0` early return cover the clock-skew
+window; the indicator hides there rather than rendering ` 0m`.
 
 **Alternatives considered:**
+- Decomposed format with `·` separator (`3d · 2h 40m`) — replaced per
+  user feedback. The user observed that at long horizons the hour
+  granularity is noise and a 24h+ indicator with hours becomes
+  visually heavy; better to drop hours entirely when days suffice.
 - Fixed three-branch format (`<24h` / `<7d` / absolute) — replaced
-  with the decomposed format per user feedback. The old branches hid
-  useful sub-day information (e.g., 3d 2h 40m became "reset en 3 d",
-  losing the 2h 40m context).
-- Always render absolute date — loses the urgency cue when the reset
-  is imminent and is less precise than `Xd` for short horizons.
-- Use `Intl.DateTimeFormat` for locale-aware formatting — out of
-  scope; the units `d`/`h`/`m` are locale-neutral.
+  earlier with the decomposed format; now replaced again with the
+  two-branch format. Each user iteration simplifies the prior one.
+- Locale-aware formatting (`Intl.DateTimeFormat`) — out of scope; the
+  units `d`/`h`/`m` are locale-neutral and short.
 
-### Helpers return leading-space strings, appended after the percentage
+### Badge placement: at the end of the codex label
 
-**Choice:** `planBadge` returns `" 󰃖"` (two-space separator) and
-`resetLabel` returns `" reset en 5 d"` (single-space separator).
-`readCodex` appends them in order to the joined parts.
+**Choice:** the badge is appended after the reset indicator (or after
+the percentage bar when no reset applies). Layout:
 
-**Rationale:** two-space separator for the badge matches the existing
-spacing between codex bar and primary/secondary bars (`parts.join("  ")`).
-Single-space for the reset indicator visually groups it with the
-percentage (same tight pair). Putting the separator inside the helper
-output keeps the call site simple:
-
-```ts
-const codexLabel = `󰚩 Codex ${quotaBar(individualRemaining)}${planBadge(planType)}${resetLabel(individual?.resetsAt)}`
+```
+󰚩 Codex <bar> [reset] [badge]
 ```
 
+Concretely with the user's current account:
+
+```
+󰚩 Codex ████░ 87% 18d 󰃖
+```
+
+**Rationale:** the user asked that the reset indicator sit next to
+the bar (`déjalo al lado de cada barra`), so the indicator is placed
+immediately after the bar with a single space. The badge, which is
+metadata about the account rather than the quota, is placed last as
+the trailing annotation. This puts the most informative component
+(quota + reset) at the front and the contextual component (account
+type) at the back, matching how the eye reads left-to-right.
+
 **Alternatives considered:**
-- Build the suffix at the call site with explicit `+- ` operators —
-  verbose and easy to introduce spacing bugs.
-- Always include both suffixes even when empty — would render stray
-  spaces. Helpers return `""` when not applicable, which the call site
-  concatenates safely.
+- Reset last, badge in the middle — rejected because it pushes the
+  reset data away from the bar it relates to.
+- Badge first, then bar, then reset — rejected because it breaks the
+  existing `<bar>%` reading order.
 
 ### No color on the badge or indicator
 
@@ -153,16 +164,16 @@ overload the visual channel.
   the default-empty fallback is the safe behavior; the badge table can
   be extended in a one-line follow-up without a spec change because the
   scenario "Unknown plan renders no badge" is already part of the spec.
-- **Risk:** the indicator flickers between ` reset Xd` and ` reset
-  Xd · Yh Zm` as the reset crosses day boundaries within a single
-  refresh window. → **Mitigation:** the refresh interval is 5 minutes
-  and the day-boundary case only changes the label twice a day; the
-  flicker is the correct signal that the reset is approaching.
+- **Risk:** the indicator switches between `Xd` and `Xh Xm` as the
+  reset crosses the 24-hour boundary within a single refresh window.
+  → **Mitigation:** the refresh interval is 5 minutes and the boundary
+  case only changes the label once a day at most; the switch is the
+  correct signal that the reset is imminent.
 - **Risk:** Nerd Font rendering requires the user's terminal to have
   a Nerd Font installed. → **Mitigation:** confirmed by the user that
-  the terminal already renders `󰚩` and `󰧑`, so the font is in place;
-  the new `·` separator is plain ASCII-compatible U+00B7 which any
-  font handles.
+  the terminal already renders `󰚩` and `󰧑`, so the font is in place.
+  The new indicator format uses only ASCII-letter units (`d`, `h`, `m`)
+  with single-space separators, which any font handles.
 - **Trade-off:** the reading of `planType` and `resetsAt` is added
   inline inside `readCodex`, which is the function the previous change
   was trying to keep simple. → **Mitigation:** both helpers are pure
