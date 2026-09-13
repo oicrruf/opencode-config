@@ -7,6 +7,9 @@ const STATE_KEY = "quota-footer.status"
 const REFRESH_INTERVAL_MS = 5 * 60 * 1_000
 const COMMAND_TIMEOUT_MS = 10_000
 const MMX_TIMEOUT_MS = 70_000
+const MAX_CONSECUTIVE_FAILURES = 3
+const CODEX_SENTINEL = "󰚩 Codex · sin datos"
+const CODEX_LOG_PREFIX = "[quota-footer]"
 
 type FooterState = {
   codex?: string
@@ -141,7 +144,10 @@ async function readMmx(signal: AbortSignal) {
   }
 }
 
-async function readCodex(signal: AbortSignal) {
+async function readCodex(
+  signal: AbortSignal,
+  onFailure?: (reason: string) => void,
+) {
   try {
     const response = await new Promise<CodexResponse>((resolve, reject) => {
       const child = spawn("codex", ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"] })
@@ -199,9 +205,11 @@ async function readCodex(signal: AbortSignal) {
     })
 
     if (response?.error) {
-      return response.error.message?.includes("authentication required")
-        ? "󰚩 Codex requiere login"
-        : undefined
+      if (response.error.message?.includes("authentication required")) {
+        return "󰚩 Codex requiere login"
+      }
+      onFailure?.(`json-rpc error: ${response.error.message ?? "unknown"}`)
+      return undefined
     }
 
     const individual = response?.result?.rateLimits?.individualLimit
@@ -220,6 +228,7 @@ async function readCodex(signal: AbortSignal) {
       primaryRemaining === undefined &&
       secondaryRemaining === undefined
     ) {
+      onFailure?.("no rate-limit fields in response")
       return undefined
     }
 
@@ -236,21 +245,57 @@ async function readCodex(signal: AbortSignal) {
     return parts.join("  ")
   } catch (error) {
     if (signal.aborted) return undefined
-    return error instanceof Error && error.message.includes("ENOENT") ? null : undefined
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.includes("ENOENT")) {
+      onFailure?.("ENOENT: codex binary not on PATH")
+      return null
+    }
+    onFailure?.(message)
+    return undefined
   }
 }
 
 const tui: TuiPlugin = async (api) => {
   let refreshing = false
+  let consecutiveCodexFailures = 0
+  // Spec trace (openspec/changes/fix-quota-stale-state/specs/tui-quota-footer/spec.md):
+  // - "Three consecutive failures reach the sentinel": counter increments on `undefined`,
+  //   sentinel replaces cached line once counter >= MAX_CONSECUTIVE_FAILURES.
+  // - "Successful read clears the sentinel": a fresh label string (success or auth-required)
+  //   resets the counter to zero and overwrites the cached value.
+  // - "Auth-required response does not count as failure": auth-required is a string return,
+  //   not undefined, so the reset path handles it; onFailure is not invoked.
+  // - "ENOENT is logged once": ENOENT returns `null`; only the segment is cleared and the
+  //   warning is emitted; the counter is left untouched (not incremented, not reset).
   const refresh = async () => {
     if (refreshing || api.lifecycle.signal.aborted) return
     refreshing = true
     try {
-      const [codex, minimax] = await Promise.all([readCodex(api.lifecycle.signal), readMmx(api.lifecycle.signal)])
+      const [codex, minimax] = await Promise.all([
+        readCodex(api.lifecycle.signal, (reason) => {
+          console.warn(CODEX_LOG_PREFIX, "codex read failed:", reason)
+        }),
+        readMmx(api.lifecycle.signal),
+      ])
       if (api.lifecycle.signal.aborted) return
       const previous = api.kv.get<FooterState>(STATE_KEY, { ready: false })
+      let nextCodex: string
+      if (codex === undefined) {
+        consecutiveCodexFailures += 1
+        nextCodex =
+          consecutiveCodexFailures >= MAX_CONSECUTIVE_FAILURES
+            ? CODEX_SENTINEL
+            : (previous.codex ?? "")
+      } else if (codex === null) {
+        // ENOENT: clear segment, counter unchanged per spec scenario.
+        nextCodex = ""
+      } else {
+        // Fresh label string (success or auth-required): reset counter, display.
+        consecutiveCodexFailures = 0
+        nextCodex = codex
+      }
       api.kv.set(STATE_KEY, {
-        codex: codex === undefined ? previous.codex : (codex ?? ""),
+        codex: nextCodex,
         minimax: minimax === undefined ? previous.minimax : (minimax ?? ""),
         ready: true,
       } satisfies FooterState)
