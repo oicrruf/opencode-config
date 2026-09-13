@@ -135,6 +135,11 @@ un-reviewable and revert becomes coarse.
   before and after.
 - For performance: measure before and after; a refactor shouldn't regress
   latency/throughput.
+- **Worktree hygiene:** when isolating a refactor in a git worktree at
+  `.opencode/worktree/<name>/`, ensure the path is in the project's
+  `.gitignore` so the worktree's working directory is not accidentally
+  tracked. Git records the worktree metadata under `.git/worktrees/`,
+  but the working directory itself is plain files.
 
 ## Reporting a refactor
 
