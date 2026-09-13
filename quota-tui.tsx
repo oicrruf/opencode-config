@@ -22,6 +22,8 @@ type FooterState = {
 type MmxQuota = {
   model_remains?: Array<{
     model_name?: string
+    end_time?: number
+    weekly_end_time?: number
     current_interval_remaining_percent?: number
     current_weekly_remaining_percent?: number
   }>
@@ -157,9 +159,13 @@ async function readMmx(signal: AbortSignal) {
     const general = quota.model_remains?.find((item) => item.model_name === "general") ?? quota.model_remains?.[0]
     if (!general || typeof general.current_interval_remaining_percent !== "number") return undefined
 
-    const parts = [`󰧑 MiniMax 5h ${quotaBar(general.current_interval_remaining_percent)}`]
+    const intervalReset = typeof general.end_time === "number" ? resetLabel(Math.floor(general.end_time / 1000)) : ""
+    const weeklyReset =
+      typeof general.weekly_end_time === "number" ? resetLabel(Math.floor(general.weekly_end_time / 1000)) : ""
+
+    const parts = [`󰧑 MiniMax 5h ${quotaBar(general.current_interval_remaining_percent)}${intervalReset}`]
     if (typeof general.current_weekly_remaining_percent === "number") {
-      parts.push(`sem ${quotaBar(general.current_weekly_remaining_percent)}`)
+      parts.push(`sem ${quotaBar(general.current_weekly_remaining_percent)}${weeklyReset}`)
     }
     return parts.join("  ")
   } catch (error) {

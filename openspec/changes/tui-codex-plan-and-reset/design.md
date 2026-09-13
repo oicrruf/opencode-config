@@ -184,14 +184,53 @@ overload the visual channel.
 ## Migration Plan
 
 - No data migration. The footer now carries more text on the codex
-  line; nothing else changes.
+  and MiniMax lines; nothing else changes.
 - Rollout: ship through the existing `install.sh` symlink. Restart
   OpenCode so the new plugin is loaded (already documented in
   `README.md`).
 - Rollback: revert the commit; the footer returns to its previous
-  two-helper-less state.
+  helper-less state.
 
 ## Open Questions
 
 None. All decisions are deterministic from the diagnosis, the spec,
 and the user's confirmation that color is out of scope for v1.
+
+## Extension: MiniMax reset indicators
+
+The same `resetLabel()` helper that powers the codex reset indicator
+is reused for the MiniMax provider's two quota windows. The MiniMax
+API (`mmx quota show --output json`) exposes reset timestamps for
+both the 5-hour interval and the weekly window inside
+`model_remains[general]`:
+
+- `end_time`: Unix milliseconds marking the end of the current 5h
+  interval.
+- `weekly_end_time`: Unix milliseconds marking the end of the current
+  weekly window.
+
+Both fields are converted to Unix seconds (`Math.floor(value / 1000)`)
+before being passed to `resetLabel()`. No new helpers, no new format
+branches; the day-boundary logic in `resetLabel()` produces the
+correct unit per window. In typical use, the 5h interval will show
+hours (e.g., `2h`, `5h 30m`) because the interval ends within 5 hours
+of the previous cycle boundary, and the weekly window will show days
+(e.g., `3d`) when more than 24 hours remain — but in the final day
+before the weekly reset, the weekly window will correctly switch to
+hours (e.g., `6h`), reflecting the actual remaining time regardless of
+the cycle's nominal length.
+
+### Risks specific to the MiniMax extension
+
+- **Risk:** MiniMax adds or removes reset-timestamp fields in a future
+  CLI release, leaving the indicator silently empty. → **Mitigation:**
+  the existing `resetLabel` empty-fallback rule covers the missing
+  field gracefully; the bar still renders. A user noticing the
+  missing reset indicator can re-probe the API and we can update the
+  type.
+- **Risk:** the 5h interval and the weekly window could in theory have
+  the same end-time (if the week starts at a 5h-cycle boundary),
+  producing two identical indicators next to two different bars.
+  → **Mitigation:** that coincidence is informative, not a bug; the
+  user can read both bars against the same clock.
+

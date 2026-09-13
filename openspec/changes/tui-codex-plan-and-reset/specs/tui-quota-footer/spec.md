@@ -45,14 +45,14 @@ space. The badge MUST NOT be colored; it inherits the same
 - **THEN** no badge is rendered at all; the helper output is never
   appended to a non-codex label
 
-### Requirement: Reset indicator immediately after codex bar
+### Requirement: Reset indicator immediately after any quota bar
 
-When the response carries `rateLimits.individualLimit.resetsAt` as a
-finite positive number (Unix seconds), the system SHALL append a reset
-indicator immediately after the codex bar (single space separator, no
-leading word). The indicator format is:
+When the response carries a reset timestamp for any quota window, the
+system SHALL append a reset indicator immediately after the bar of
+that window (single space separator, no leading word). The indicator
+applies uniformly to all providers and all windows; the format is:
 
-- Distance between `resetsAt` and `Date.now() / 1000` is
+- Distance between the reset timestamp and `Date.now() / 1000` is
   `>= 86400` seconds (one day or more) → ` {d}d` where `{d}` is
   `floor(diffSeconds / 86400)`. Hours and minutes are dropped in this
   case so the indicator stays compact at long horizons.
@@ -61,39 +61,71 @@ leading word). The indicator format is:
   non-zero (omit any component whose value is zero). Days are dropped
   in this case.
 - Distance is `0` or negative (clock-skew window) → no indicator.
-- `resetsAt` is missing, null, zero, negative, or not a finite number
-  → no indicator.
+- The reset timestamp is missing, null, zero, negative, or not a
+  finite number → no indicator.
 
 The indicator MUST be preceded by exactly one space, MUST NOT include
 the word "reset" or any other label, MUST NOT be colored, and MUST NOT
 include any separator character (`·`, dash, slash, etc.) — only the
 single space between hours and minutes when both are present.
 
+For the **codex** provider the reset timestamp is read from
+`rateLimits.individualLimit.resetsAt` and is expressed in Unix seconds.
+For the **MiniMax** provider the 5-hour interval's reset timestamp is
+read from `model_remains[general].end_time` and the weekly window's
+reset timestamp is read from `model_remains[general].weekly_end_time`;
+both are expressed in Unix milliseconds and MUST be converted to Unix
+seconds before being passed to the indicator function.
+
 #### Scenario: Reset more than one day shows days only
 
-- **WHEN** `resetsAt` is one day or more from now
-- **THEN** the codex label, immediately after the percentage bar, ends
-  with ` {d}d` where `{d}` is the integer day count; no hours, no
-  minutes, no `·`
+- **WHEN** the reset timestamp for a window is one day or more from
+  now
+- **THEN** the label for that window, immediately after the
+  percentage bar, ends with ` {d}d` where `{d}` is the integer day
+  count; no hours, no minutes, no `·`
 
 #### Scenario: Reset less than one day shows hours and/or minutes
 
-- **WHEN** `resetsAt` is between 1 minute and 24 hours from now
-- **THEN** the codex label, immediately after the percentage bar, ends
-  with ` {h}h {m}m` when both components are non-zero, ` {h}h` when
-  only hours are non-zero, or ` {m}m` when only minutes are non-zero —
-  never with a days component
+- **WHEN** the reset timestamp for a window is between 1 minute and
+  24 hours from now
+- **THEN** the label for that window, immediately after the
+  percentage bar, ends with ` {h}h {m}m` when both components are
+  non-zero, ` {h}h` when only hours are non-zero, or ` {m}m` when
+  only minutes are non-zero — never with a days component
 
 #### Scenario: Reset under one minute renders no indicator
 
-- **WHEN** `resetsAt` is less than 60 seconds from now or already in
-  the past
-- **THEN** no reset indicator is appended; the codex label ends exactly
-  at the percentage bar
+- **WHEN** the reset timestamp for a window is less than 60 seconds
+  from now or already in the past
+- **THEN** no reset indicator is appended to that window
 
 #### Scenario: Reset field missing renders no indicator
 
-- **WHEN** `resetsAt` is missing, null, zero, negative, or not a
-  finite number
-- **THEN** no reset indicator is appended; the codex label ends exactly
-  at the percentage bar
+- **WHEN** the reset timestamp for a window is missing, null, zero,
+  negative, or not a finite number
+- **THEN** no reset indicator is appended to that window
+
+#### Scenario: MiniMax 5-hour interval renders hours
+
+- **WHEN** the MiniMax response carries `end_time` (Unix ms) for the
+  general model and the distance from `end_time / 1000` to now is
+  less than 24 hours
+- **THEN** the MiniMax `5h` part ends with an hour-based indicator
+  (e.g., ` 2h` or ` 5h 30m`) immediately after its percentage bar
+
+#### Scenario: MiniMax weekly interval renders days when over 24 hours
+
+- **WHEN** the MiniMax response carries `weekly_end_time` (Unix ms)
+  for the general model and the distance from `weekly_end_time / 1000`
+  to now is 24 hours or more
+- **THEN** the MiniMax `sem` part ends with a day-based indicator
+  (e.g., ` 3d`) immediately after its percentage bar
+
+#### Scenario: MiniMax weekly interval renders hours when under 24 hours
+
+- **WHEN** the MiniMax weekly cycle is in its final day (less than
+  24 hours remaining)
+- **THEN** the MiniMax `sem` part ends with an hour-based indicator
+  rather than a day-based one, reflecting the actual remaining time
+  regardless of the cycle's nominal length
