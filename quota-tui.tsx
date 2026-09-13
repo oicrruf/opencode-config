@@ -10,6 +10,8 @@ const MMX_TIMEOUT_MS = 70_000
 const MAX_CONSECUTIVE_FAILURES = 3
 const CODEX_SENTINEL = "󰚩 Codex · sin datos"
 const CODEX_LOG_PREFIX = "[quota-footer]"
+const CODEX_PLAN_BUSINESS_ICON = "󰃖"
+const CODEX_PLAN_PERSONAL_ICON = "󰀄"
 
 type FooterState = {
   codex?: string
@@ -45,6 +47,7 @@ type CodexCredits = {
 }
 
 type CodexQuota = {
+  planType?: string | null
   rateLimits?: {
     primary?: CodexWindow | null
     secondary?: CodexWindow | null
@@ -124,6 +127,24 @@ function coloredLabel(label: string, theme: TuiThemeCurrent) {
 
   output.push(label.slice(cursor))
   return output
+}
+
+function planBadge(planType?: string | null): string {
+  if (typeof planType !== "string" || planType.length === 0) return ""
+  if (planType.startsWith("self_serve_business")) return ` ${CODEX_PLAN_BUSINESS_ICON}`
+  if (/^(free|plus|pro|team)$/.test(planType)) return ` ${CODEX_PLAN_PERSONAL_ICON}`
+  return ""
+}
+
+const CODEX_RESET_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const
+
+function resetLabel(resetsAt?: number | null): string {
+  if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
+  const diffSeconds = resetsAt - Math.floor(Date.now() / 1000)
+  if (diffSeconds < 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 3600))}h`
+  if (diffSeconds < 7 * 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 86400))} d`
+  const date = new Date(resetsAt * 1000)
+  return ` reset ${CODEX_RESET_MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`
 }
 
 async function readMmx(signal: AbortSignal) {
@@ -234,7 +255,9 @@ async function readCodex(
 
     const parts: string[] = []
     if (individualRemaining !== undefined) {
-      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}`)
+      const badge = planBadge(response?.result?.planType)
+      const reset = resetLabel(individual?.resetsAt)
+      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}${badge}${reset}`)
     }
     if (primaryRemaining !== undefined) {
       const window = primary?.windowDurationMins
