@@ -66,39 +66,47 @@ badge.
 - Hardcoded icon per plan in a switch — verbose for a two-icon feature
   and obscures the fallback rule.
 
-### Reset formatter branches on `Date.now()` distance
+### Reset formatter decomposes into days / hours / minutes
 
-**Choice:**
+**Choice:** compute the three components from the seconds distance and
+render only the non-zero ones, with `·` (U+00B7) as the days-to-sub-day
+separator:
 
 ```ts
 function resetLabel(resetsAt?: number | null): string {
   if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
-  const diffSeconds = resetsAt - Math.floor(Date.now() / 1000)
-  if (diffSeconds < 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 3600))}h`
-  if (diffSeconds < 7 * 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 86400))} d`
-  const date = new Date(resetsAt * 1000)
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()]
-  return ` reset ${month} ${date.getUTCDate()}`
+  const totalSeconds = Math.max(0, resetsAt - Math.floor(Date.now() / 1000))
+  if (totalSeconds === 0) return ""
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  if (days > 0 && (hours > 0 || minutes > 0)) return ` reset ${days}d · ${hours}h ${minutes}m`
+  if (days > 0) return ` reset ${days}d`
+  if (hours > 0 && minutes > 0) return ` reset ${hours}h ${minutes}m`
+  if (hours > 0) return ` reset ${hours}h`
+  if (minutes > 0) return ` reset ${minutes}m`
+  return ""
 }
 ```
 
-**Rationale:** Unix-seconds arithmetic avoids constructing a `Date`
-object for the two short-form branches (which would need their own
-parsing of the difference). The absolute-date branch needs `Date` to
-get the month name; UTC is used so the indicator is stable regardless
-of the user's local timezone. The `Math.max(0, ...)` clamps protect
-against the brief window where `resetsAt` is in the past by a few
-seconds due to clock skew.
+**Rationale:** the user requested a uniform decomposed format where
+the largest non-zero unit is the primary display and smaller units are
+shown only when present. `·` separates the day scale from the sub-day
+scale (days + hours/minutes); within sub-day units, a single space is
+used (no `·`). The `Math.max(0, ...)` clamp plus the `totalSeconds === 0`
+early return cover the clock-skew window where `resetsAt` is briefly in
+the past; the indicator hides in that window rather than rendering
+` reset 0m`.
 
 **Alternatives considered:**
-- Always render the absolute date — loses the urgency cue when the
-  reset is imminent.
-- Use `Intl.DateTimeFormat` for locale-aware formatting — overkill for
-  a three-letter English abbreviation, and would force a decision
-  about locale that is out of scope.
-- Render the date in the user's local timezone — causes "the indicator
-  changed while I was using it" jitter when the user crosses midnight;
-  UTC is a stable reference.
+- Fixed three-branch format (`<24h` / `<7d` / absolute) — replaced
+  with the decomposed format per user feedback. The old branches hid
+  useful sub-day information (e.g., 3d 2h 40m became "reset en 3 d",
+  losing the 2h 40m context).
+- Always render absolute date — loses the urgency cue when the reset
+  is imminent and is less precise than `Xd` for short horizons.
+- Use `Intl.DateTimeFormat` for locale-aware formatting — out of
+  scope; the units `d`/`h`/`m` are locale-neutral.
 
 ### Helpers return leading-space strings, appended after the percentage
 
@@ -145,15 +153,16 @@ overload the visual channel.
   the default-empty fallback is the safe behavior; the badge table can
   be extended in a one-line follow-up without a spec change because the
   scenario "Unknown plan renders no badge" is already part of the spec.
-- **Risk:** the day-of-month formatter uses `date.getUTCDate()` so a
-  user in a UTC-X timezone crossing midnight locally before UTC sees a
-  one-day discrepancy. → **Mitigation:** the indicator is approximate
-  anyway; users comparing it to a wall calendar will not be off by more
-  than one day, and the absolute-date form is only used when the reset
-  is more than a week away.
+- **Risk:** the indicator flickers between ` reset Xd` and ` reset
+  Xd · Yh Zm` as the reset crosses day boundaries within a single
+  refresh window. → **Mitigation:** the refresh interval is 5 minutes
+  and the day-boundary case only changes the label twice a day; the
+  flicker is the correct signal that the reset is approaching.
 - **Risk:** Nerd Font rendering requires the user's terminal to have
   a Nerd Font installed. → **Mitigation:** confirmed by the user that
-  the terminal already renders `󰚩` and `󰧑`, so the font is in place.
+  the terminal already renders `󰚩` and `󰧑`, so the font is in place;
+  the new `·` separator is plain ASCII-compatible U+00B7 which any
+  font handles.
 - **Trade-off:** the reading of `planType` and `resetsAt` is added
   inline inside `readCodex`, which is the function the previous change
   was trying to keep simple. → **Mitigation:** both helpers are pure

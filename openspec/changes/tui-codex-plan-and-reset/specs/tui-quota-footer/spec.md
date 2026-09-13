@@ -48,43 +48,64 @@ same `textMuted` foreground the rest of the label uses.
 
 When the response carries `rateLimits.individualLimit.resetsAt` as a
 finite positive number (Unix seconds), the system SHALL append a reset
-indicator to the codex label, formatted from the distance between
-`resetsAt` and `Date.now() / 1000`:
+indicator to the codex label, decomposed into days, hours, and minutes
+from the distance between `resetsAt` and `Date.now() / 1000`:
 
-- distance `< 24 * 60 * 60` seconds → `reset en Xh` where `X` is the
-  integer number of hours remaining (rounded)
-- distance `< 7 * 24 * 60 * 60` seconds → `reset en X d` where `X` is
-  the integer number of days remaining
-- otherwise → `reset MMM D` with month abbreviated to three letters in
-  English (`Jan`, `Feb`, `Mar`, `Apr`, `May`, `Jun`, `Jul`, `Aug`,
-  `Sep`, `Oct`, `Nov`, `Dec`) and day as an ordinal-free integer
+- Days: integer `floor(diffSeconds / 86400)`
+- Hours: integer `floor(diffSeconds % 86400 / 3600)`
+- Minutes: integer `floor(diffSeconds % 3600 / 60)`
 
-The indicator MUST be preceded by one space and MUST NOT be colored.
-When `resetsAt` is missing, null, or non-positive, no indicator is
-appended.
+The system MUST omit any component whose value is zero and MUST NOT
+render a leading zero. The label format rules are:
 
-#### Scenario: Reset under 24 hours shows hours
+- days > 0 AND (hours > 0 OR minutes > 0) → ` reset {d}d · {h}h {m}m`
+- days > 0 AND hours = 0 AND minutes = 0 → ` reset {d}d`
+- days = 0 AND hours > 0 AND minutes > 0 → ` reset {h}h {m}m`
+- days = 0 AND hours > 0 AND minutes = 0 → ` reset {h}h`
+- days = 0 AND hours = 0 AND minutes > 0 → ` reset {m}m`
+- all three zero → empty (no indicator appended)
 
-- **WHEN** the response carries `resetsAt` whose value is less than
-  24 hours from now
-- **THEN** the codex label ends with ` reset en Xh` where `X` is the
-  rounded number of hours remaining
+The `·` (U+00B7 middle dot) appears ONLY between the days component
+and a sub-day component. Within hours and minutes, a single space is
+used; no `·` ever appears there.
 
-#### Scenario: Reset under one week shows days
+The indicator MUST be preceded by exactly one space and MUST NOT be
+colored. When `resetsAt` is missing, null, zero, negative, or not a
+finite number, no indicator is appended. When the computed distance is
+zero or negative (clock-skew window), no indicator is appended.
 
-- **WHEN** `resetsAt` is between 24 hours and 7 days from now
-- **THEN** the codex label ends with ` reset en X d` where `X` is the
-  integer number of days remaining
+#### Scenario: Reset more than one week shows days only
 
-#### Scenario: Reset beyond one week shows absolute date
+- **WHEN** `resetsAt` is more than 7 days from now and the hours and
+  minutes components both compute to zero
+- **THEN** the codex label ends with ` reset {d}d` where `{d}` is the
+  integer day count, with no sub-day suffix and no `·`
 
-- **WHEN** `resetsAt` is more than 7 days from now
-- **THEN** the codex label ends with ` reset MMM D` using English
-  three-letter month abbreviation and integer day
+#### Scenario: Reset between one day and one week decomposes with middle dot
+
+- **WHEN** `resetsAt` is between 24 hours and 7 days from now and at
+  least one of hours or minutes computes to a non-zero value
+- **THEN** the codex label ends with ` reset {d}d · {h}h {m}m` where
+  every non-zero component is present and the `·` separates days from
+  hours
+
+#### Scenario: Reset under one day shows hours and minutes
+
+- **WHEN** `resetsAt` is between 1 minute and 24 hours from now
+- **THEN** the codex label ends with ` reset {h}h {m}m` when both are
+  non-zero, ` reset {h}h` when only hours are non-zero, or ` reset {m}m`
+  when only minutes are non-zero — never with a days component
+
+#### Scenario: Reset under one minute renders no indicator
+
+- **WHEN** `resetsAt` is less than 60 seconds from now or already in
+  the past
+- **THEN** no reset indicator is appended; the codex label ends exactly
+  at the percentage (or badge if one is present)
 
 #### Scenario: Reset field missing renders no indicator
 
 - **WHEN** `resetsAt` is missing, null, zero, negative, or not a
   finite number
-- **THEN** the codex label ends exactly at the percentage (or badge if
-  one is present), with no trailing whitespace
+- **THEN** no reset indicator is appended; the codex label ends exactly
+  at the percentage (or badge if one is present)

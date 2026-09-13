@@ -9,8 +9,8 @@
 
 ## 3. Reset indicator helper
 
-- [x] 3.1 Add a module-level `resetLabel(resetsAt?: number | null): string` helper with the three branches (`<24h` hours, `<7d` days, otherwise absolute `MMM D`) and the empty-input guard; verify by tracing each spec scenario for "Reset date indicator after codex label" against the helper output
-- [x] 3.2 Append `resetLabel(individual?.resetsAt)` after the plan badge in the same `parts.push` line; verify the assembled string matches the expected `Codex <bar> 󰃖 reset en 18 d` shape on a real codex response (the existing 2026-10-01 reset from the diagnosis will exercise the `<7d` days branch boundary)
+- [x] 3.1 Add a module-level `resetLabel(resetsAt?: number | null): string` helper that decomposes the distance into days/hours/minutes, omits zero components, and uses `·` (U+00B7) as the days-to-sub-day separator; verify by tracing each spec scenario for "Reset date indicator after codex label" against the helper output
+- [x] 3.2 Append `resetLabel(individual?.resetsAt)` after the plan badge in the same `parts.push` line; verify the assembled string matches the expected `Codex <bar> 󰃖 reset 18d` shape on a real codex response (the existing 2026-10-01 reset will exercise the days-only branch)
 
 ## 4. Spec verification
 

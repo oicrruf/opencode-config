@@ -136,15 +136,20 @@ function planBadge(planType?: string | null): string {
   return ""
 }
 
-const CODEX_RESET_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const
-
 function resetLabel(resetsAt?: number | null): string {
   if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
-  const diffSeconds = resetsAt - Math.floor(Date.now() / 1000)
-  if (diffSeconds < 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 3600))}h`
-  if (diffSeconds < 7 * 24 * 60 * 60) return ` reset en ${Math.max(0, Math.round(diffSeconds / 86400))} d`
-  const date = new Date(resetsAt * 1000)
-  return ` reset ${CODEX_RESET_MONTHS[date.getUTCMonth()]} ${date.getUTCDate()}`
+  const totalSeconds = Math.max(0, resetsAt - Math.floor(Date.now() / 1000))
+  if (totalSeconds === 0) return ""
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const subDay: string[] = []
+  if (hours > 0) subDay.push(`${hours}h`)
+  if (minutes > 0) subDay.push(`${minutes}m`)
+  if (days > 0 && subDay.length > 0) return ` reset ${days}d · ${subDay.join(" ")}`
+  if (days > 0) return ` reset ${days}d`
+  if (subDay.length > 0) return ` reset ${subDay.join(" ")}`
+  return ""
 }
 
 async function readMmx(signal: AbortSignal) {
