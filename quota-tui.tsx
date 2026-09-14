@@ -11,9 +11,15 @@
  *   - mmx:    `mmx login`   (or the `mmx auth login` subcommand your
  *                           build exposes)
  *
+ * The TUI icons (`󰧑`, `󰚩`, `󰃖`, `󰀄`) come from a Nerd Font — install
+ * `JetBrainsMono Nerd Font` via `scripts/install-nerd-fonts.sh` (Linux,
+ * macOS) or `scripts/install-nerd-fonts.ps1` (Windows). See the README
+ * "Nerd Fonts" section, then select "JetBrainsMono Nerd Font" in your
+ * terminal profile so the icons render correctly.
+ *
  * Visible footer states
  * ---------------------
- * 1. Fresh data on both sides (e.g. `󰧑 MiniMax 5h ███░░ 50% 2h | 󰚩 Codex ████░ 87% 18d 󰃖`).
+ * 1. Fresh data on both sides (e.g. `󰧑 MiniMax 5h ███░░ 50% 0h 2m | 󰚩 Codex ████░ 87% 18d 5h 󰃖`).
  * 2. `󰚩 Codex · login` — the codex CLI is not logged in. Run `codex login`.
  * 3. `󰧑 MiniMax requiere login` — the mmx CLI is not logged in. Run `mmx login`.
  * 4. `󰚩 Codex · sin datos` — codex is failing repeatedly for a non-auth
@@ -82,12 +88,12 @@ type CodexCredits = {
 }
 
 type CodexQuota = {
-  planType?: string | null
   rateLimits?: {
     primary?: CodexWindow | null
     secondary?: CodexWindow | null
     individualLimit?: CodexIndividualLimit | null
     credits?: CodexCredits | null
+    planType?: string | null
   }
 }
 
@@ -213,8 +219,8 @@ function coloredLabel(label: string, theme: TuiThemeCurrent) {
 
 function planBadge(planType?: string | null): string {
   if (typeof planType !== "string" || planType.length === 0) return ""
-  if (planType.startsWith("self_serve_business")) return ` ${CODEX_PLAN_BUSINESS_ICON}`
-  if (/^(free|plus|pro|team)$/.test(planType)) return ` ${CODEX_PLAN_PERSONAL_ICON}`
+  if (planType.startsWith("self_serve_business")) return CODEX_PLAN_BUSINESS_ICON
+  if (/^(free|plus|pro|team)$/.test(planType)) return CODEX_PLAN_PERSONAL_ICON
   return ""
 }
 
@@ -222,14 +228,17 @@ function resetLabel(resetsAt?: number | null): string {
   if (typeof resetsAt !== "number" || !Number.isFinite(resetsAt) || resetsAt <= 0) return ""
   const totalSeconds = Math.max(0, resetsAt - Math.floor(Date.now() / 1000))
   if (totalSeconds === 0) return ""
-  if (totalSeconds >= 86400) return ` ${Math.floor(totalSeconds / 86400)}d`
+  if (totalSeconds >= 86400) {
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    return hours > 0 ? ` ${days}d ${hours}h` : ` ${days}d`
+  }
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const subDay: string[] = []
-  if (hours > 0) subDay.push(`${hours}h`)
-  if (minutes > 0) subDay.push(`${minutes}m`)
-  if (subDay.length > 0) return ` ${subDay.join(" ")}`
-  return ""
+  // Sub-day horizons always render both hours and minutes (no zero
+  // suppression) so the 5h window reads consistently: `3h 5m`, never
+  // `0h 5m` or `45m`.
+  return ` ${hours}h ${minutes}m`
 }
 
 async function readMmx(signal: AbortSignal, onFailure?: (reason: string) => void) {
@@ -353,10 +362,21 @@ async function readCodex(
     }
 
     const parts: string[] = []
+    const hasAnyRemaining =
+      individualRemaining !== undefined ||
+      primaryRemaining !== undefined ||
+      secondaryRemaining !== undefined
+    const badge = planBadge(response?.result?.rateLimits?.planType)
     if (individualRemaining !== undefined) {
       const reset = resetLabel(individual?.resetsAt)
-      const badge = planBadge(response?.result?.planType)
-      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}${reset}${badge}`)
+      const badgeSuffix = badge.length > 0 ? ` ${badge}` : ""
+      parts.push(`󰚩 Codex ${quotaBar(individualRemaining)}${reset}${badgeSuffix}`)
+    } else if (hasAnyRemaining) {
+      // Server returned null individualLimit (some plan types) but exposed
+      // primary/secondary windows. Surface the codex prefix once so the user
+      // still gets the icon, the right grouping, and the plan badge.
+      const badgeSuffix = badge.length > 0 ? ` ${badge}` : ""
+      parts.push(`󰚩 Codex${badgeSuffix}`)
     }
     if (primaryRemaining !== undefined) {
       const window = primary?.windowDurationMins

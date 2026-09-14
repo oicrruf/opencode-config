@@ -4,7 +4,9 @@ This repository is the canonical, version-controlled global OpenCode setup.
 It provides autonomous permissions, global role agents, reusable commands and
 skills, and Herdr integration.
 
-## Install on WSL/Linux
+## Install on Linux, macOS, or Windows
+
+### Linux and macOS
 
 ```bash
 git clone https://github.com/oicrruf/opencode-config.git ~/Projects/opencode-config
@@ -16,6 +18,79 @@ replace existing non-link paths. The Herdr-managed plugin is left untouched.
 
 Restart OpenCode after installing or pulling changes, because configuration is
 loaded only at startup.
+
+### Windows (native, PowerShell 5.1+)
+
+```powershell
+git clone https://github.com/oicrruf/opencode-config.git $HOME\Projects\opencode-config
+powershell -ExecutionPolicy Bypass -File $HOME\Projects\opencode-config\scripts\install-nerd-fonts.ps1
+# Then create the configuration links by hand or run install.sh under WSL.
+```
+
+Restart OpenCode after installing or pulling changes, because configuration is
+loaded only at startup.
+
+## Nerd Fonts
+
+The TUI quota footer (`quota-tui.tsx`) renders Nerd Font `nf-md-*` icons in the
+bottom bar. Without a Nerd Font installed, those icons render as `` or
+silently disappear. The installer takes care of the font on Linux and macOS; on
+Windows the same step is split into a native PowerShell script.
+
+### What gets installed
+
+`JetBrainsMono Nerd Font` from the official
+[`ryanoasis/nerd-fonts`](https://github.com/ryanoasis/nerd-fonts) GitHub
+release marked `latest`. The installer always picks the latest release; it does
+not pin a version.
+
+| Platform  | Script                              | Destination (per-user, no elevation)                  |
+| --------- | ----------------------------------- | ---------------------------------------------------- |
+| Linux     | `scripts/install-nerd-fonts.sh`     | `~/.local/share/fonts/JetBrainsMonoNerdFont`         |
+| macOS     | `scripts/install-nerd-fonts.sh`     | `~/Library/Fonts/JetBrainsMonoNerdFont`              |
+| Windows   | `scripts/install-nerd-fonts.ps1`    | `%LOCALAPPDATA%\Microsoft\Windows\Fonts\JetBrainsMonoNerdFont` |
+
+`install.sh` calls the Bash installer automatically. The PowerShell installer
+must be invoked by hand on Windows because `install.sh` is a Bash script.
+
+### Opt-out
+
+Set `OPENCODE_INSTALL_NERD_FONTS=0` before running `install.sh` (or pass
+`--Skip` to the PowerShell script, or set the env var there too) to skip the
+font step silently. The OpenCode configuration links are always created.
+
+### Manual terminal selection
+
+Installing the font does not activate it. After the script finishes, open your
+terminal's profile settings and pick **JetBrainsMono Nerd Font** as the font
+family:
+
+- **Windows Terminal**: Settings → Profiles → Defaults → Appearance → Font face.
+- **Terminal.app** (macOS): Profiles → Text → Font → Change.
+- **iTerm2** (macOS): Preferences → Profiles → Text → Font.
+- **GNOME Terminal** (Linux): Preferences → Unnamed profile → Text → Custom
+  font.
+- **Kitty** (Linux/macOS): edit `~/.config/kitty/kitty.conf` and set
+  `font_family JetBrainsMono Nerd Font`.
+- **WezTerm** (cross-platform): set `config.font = { family = "JetBrainsMono Nerd Font" }`
+  in your `wezterm.lua`.
+
+### Manual install (offline mode)
+
+If the GitHub API is unreachable from the host (rate-limited, blocked, behind a
+firewall), download `JetBrainsMono.zip` from the
+[latest release page](https://github.com/ryanoasis/nerd-fonts/releases/latest)
+once on a machine that does have access, copy it to the target host, and run:
+
+```bash
+# Linux/macOS
+scripts/install-nerd-fonts.sh --offline /path/to/JetBrainsMono.zip
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts\install-nerd-fonts.ps1 -Offline C:\path\to\JetBrainsMono.zip
+```
 
 ## Update
 

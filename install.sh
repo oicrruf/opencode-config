@@ -6,6 +6,19 @@ config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
 mkdir -p "$config_dir"
 
+# Install JetBrainsMono Nerd Font (Linux/macOS only). The PowerShell installer
+# in scripts/install-nerd-fonts.ps1 is the supported path for Windows.
+#
+# This step is opt-out via OPENCODE_INSTALL_NERD_FONTS=0 and is non-fatal:
+# a failure here MUST NOT prevent the OpenCode configuration links from being
+# created. Exit codes: 0 = installed/skipped, 1 = failed (we just warn).
+if [ "${OPENCODE_INSTALL_NERD_FONTS:-1}" != "0" ] && [ -x "$repo_dir/scripts/install-nerd-fonts.sh" ]; then
+  if ! "$repo_dir/scripts/install-nerd-fonts.sh"; then
+    printf 'Warning: JetBrainsMono Nerd Font install failed; OpenCode configuration links were still created.\n' >&2
+    printf 'See scripts/install-nerd-fonts.sh --help for manual steps.\n' >&2
+  fi
+fi
+
 link() {
   local source="$1"
   local target="$2"
