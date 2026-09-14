@@ -1,3 +1,34 @@
+/**
+ * quota-footer — TUI footer that renders codex + MiniMax quota bars.
+ *
+ * Prerequisites
+ * ------------
+ * Both provider CLIs MUST be logged in for their respective bars to
+ * render. The plugin does not perform login itself; if a bar is missing,
+ * run the matching command in your shell:
+ *
+ *   - codex:  `codex login`
+ *   - mmx:    `mmx login`   (or the `mmx auth login` subcommand your
+ *                           build exposes)
+ *
+ * Visible footer states
+ * ---------------------
+ * 1. Fresh data on both sides (e.g. `󰧑 MiniMax 5h ███░░ 50% 2h | 󰚩 Codex ████░ 87% 18d 󰃖`).
+ * 2. `󰚩 Codex · login` — the codex CLI is not logged in. Run `codex login`.
+ * 3. `󰧑 MiniMax requiere login` — the mmx CLI is not logged in. Run `mmx login`.
+ * 4. `󰚩 Codex · sin datos` — codex is failing repeatedly for a non-auth
+ *    reason (timeout, JSON-RPC error, malformed response). Tail the
+ *    `[quota-footer]` warning stream (e.g. from the OpenCode dev
+ *    console) for the specific failure reason.
+ *
+ * The MiniMax segment silently disappears on sustained non-auth
+ * failures; only auth-required failures are surfaced as a label
+ * (state #3 above) so the operator has a clear remediation.
+ *
+ * Spec: openspec/specs/tui-quota-footer/spec.md
+ *         (and per-change specs under openspec/changes/)
+ */
+
 /** @jsxImportSource @opentui/solid */
 
 import { spawn } from "node:child_process"
@@ -9,6 +40,8 @@ const COMMAND_TIMEOUT_MS = 10_000
 const MMX_TIMEOUT_MS = 70_000
 const MAX_CONSECUTIVE_FAILURES = 3
 const CODEX_SENTINEL = "󰚩 Codex · sin datos"
+const CODEX_LOGIN_REQUIRED_LABEL = "󰚩 Codex · login"
+const MMX_LOGIN_REQUIRED_LABEL = "󰧑 MiniMax requiere login"
 const CODEX_LOG_PREFIX = "[quota-footer]"
 const CODEX_PLAN_BUSINESS_ICON = "󰃖"
 const CODEX_PLAN_PERSONAL_ICON = "󰀄"
@@ -58,10 +91,57 @@ type CodexQuota = {
   }
 }
 
+type CodexResponseErrorData = {
+  type?: string
+  reason?: string
+  [key: string]: unknown
+}
+
+type CodexResponseError = {
+  code?: number
+  message?: string
+  data?: CodexResponseErrorData
+}
+
 type CodexResponse = {
   id?: number
   result?: CodexQuota
-  error?: { message?: string }
+  error?: CodexResponseError
+}
+
+const AUTH_REQUIRED_PATTERNS = [
+  "authentication required",
+  "not authenticated",
+  "not logged in",
+  "login required",
+  "log in required",
+  "auth required",
+  "unauthorized",
+  "token expired",
+  "session expired",
+  "session not authenticated",
+]
+
+function messageContainsAuthRequired(message: string | undefined): boolean {
+  if (!message) return false
+  return AUTH_REQUIRED_PATTERNS.some((pattern) => message.toLowerCase().includes(pattern))
+}
+
+function isAuthRequiredError(error?: CodexResponseError): boolean {
+  if (!error) return false
+  if (messageContainsAuthRequired(error.message)) return true
+  const data = error.data
+  if (!data || typeof data !== "object") return false
+  if (typeof data.type === "string" && messageContainsAuthRequired(data.type)) return true
+  if (typeof data.reason === "string" && messageContainsAuthRequired(data.reason)) return true
+  return false
+}
+
+function formatCodexError(error: CodexResponseError): string {
+  const { code, message } = error
+  if (typeof code === "number" && typeof message === "string") return `code ${code}: ${message}`
+  if (typeof code === "number") return `code ${code}`
+  return message ?? "unknown"
 }
 
 function run(command: string, args: string[], signal: AbortSignal, timeoutMs = COMMAND_TIMEOUT_MS) {
@@ -152,7 +232,7 @@ function resetLabel(resetsAt?: number | null): string {
   return ""
 }
 
-async function readMmx(signal: AbortSignal) {
+async function readMmx(signal: AbortSignal, onFailure?: (reason: string) => void) {
   try {
     const output = await run("mmx", ["quota", "show", "--output", "json", "--quiet"], signal, MMX_TIMEOUT_MS)
     const quota = JSON.parse(output) as MmxQuota
@@ -170,7 +250,17 @@ async function readMmx(signal: AbortSignal) {
     return parts.join("  ")
   } catch (error) {
     if (signal.aborted) return undefined
-    return error instanceof Error && error.message.includes("ENOENT") ? null : undefined
+    if (!(error instanceof Error)) return undefined
+    if (error.message.includes("ENOENT")) {
+      onFailure?.("ENOENT: mmx binary not on PATH")
+      return null
+    }
+    if (messageContainsAuthRequired(error.message)) {
+      // Auth-required is a fresh label, not a failure: do not call onFailure.
+      return MMX_LOGIN_REQUIRED_LABEL
+    }
+    onFailure?.(error.message)
+    return undefined
   }
 }
 
@@ -235,10 +325,10 @@ async function readCodex(
     })
 
     if (response?.error) {
-      if (response.error.message?.includes("authentication required")) {
-        return "󰚩 Codex requiere login"
+      if (isAuthRequiredError(response.error)) {
+        return CODEX_LOGIN_REQUIRED_LABEL
       }
-      onFailure?.(`json-rpc error: ${response.error.message ?? "unknown"}`)
+      onFailure?.(`json-rpc error: ${formatCodexError(response.error)}`)
       return undefined
     }
 
@@ -299,6 +389,20 @@ const tui: TuiPlugin = async (api) => {
   //   not undefined, so the reset path handles it; onFailure is not invoked.
   // - "ENOENT is logged once": ENOENT returns `null`; only the segment is cleared and the
   //   warning is emitted; the counter is left untouched (not incremented, not reset).
+  //
+  // Spec trace (openspec/changes/tui-mmx-auth-required/specs/tui-quota-footer/spec.md):
+  // - "MiniMax login label is shown when the CLI is not authenticated": `readMmx`'s catch
+  //   block detects auth-required in `error.message` and returns MMX_LOGIN_REQUIRED_LABEL,
+  //   which is a fresh string and therefore replaces the cached minimax segment (the
+  //   `undefined ? previous.minimax : (minimax ?? "")` branch handles it).
+  // - "Successful MiniMax read clears the login label": same path — a fresh string from
+  //   `readMmx` overwrites the cached auth-required label.
+  // - "MiniMax login label does not appear for unrelated failures": non-auth errors
+  //   (timeout, malformed JSON, etc.) fall through to `onFailure?.(message); return undefined`,
+  //   which silently keeps the previous value and does NOT surface a login label.
+  // - "ENOENT for mmx keeps the existing empty-segment behavior": ENOENT returns `null`
+  //   which falls through the `minimax === undefined` guard and clears the cached segment,
+  //   matching the codex ENOENT semantics.
   const refresh = async () => {
     if (refreshing || api.lifecycle.signal.aborted) return
     refreshing = true
@@ -307,7 +411,9 @@ const tui: TuiPlugin = async (api) => {
         readCodex(api.lifecycle.signal, (reason) => {
           console.warn(CODEX_LOG_PREFIX, "codex read failed:", reason)
         }),
-        readMmx(api.lifecycle.signal),
+        readMmx(api.lifecycle.signal, (reason) => {
+          console.warn(CODEX_LOG_PREFIX, "mmx read failed:", reason)
+        }),
       ])
       if (api.lifecycle.signal.aborted) return
       const previous = api.kv.get<FooterState>(STATE_KEY, { ready: false })
