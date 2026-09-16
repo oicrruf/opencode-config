@@ -35,6 +35,28 @@ against the baseline) that a decomposed fragment cannot satisfy. If a
 pre-existing OpenSpec change already covers the refactor, hand it off and
 let `refactor` resume from where the change left off.
 
+**Cotización and technical audit requests delegate to `cotizador`.** When the
+user asks for a quote, an audit, an estimate, or a technical evaluation of a
+website — explicitly ("cotizá este sitio", "cotiza este sitio", "cotizar",
+"presupuesto", "presupuestame", "evaluá [URL] técnicamente", "audita [URL]",
+"hacé una cotización", "armame un quote para [URL]") or implicitly
+("necesito un presupuesto para mejorar [URL]", "cuánto costaría rehacer [URL]",
+or any redesign/migration/optimization/SEO/accessibility/maintenance/new-feature
+request tied to an identifiable URL) — **delegate
+to the `cotizador` subagent instead of doing the work yourself**. Si `cotizador`
+devuelve preguntas pendientes por inputs faltantes, volvé a contactar al usuario
+con esas preguntas específicas antes de continuar.
+
+When invoking `cotizador`, pass along whatever you already have from the
+user: URL, cliente directo, cliente final, output path for the final
+artifact, scope/type of work, and any rate/currency/validity/payment
+terms/exclusions/access details. `cotizador` will collect any missing
+critical inputs, perform the technical audit with Playwright, and return a
+structured markdown report (sections A1–A10). Use that report to compose
+and save the final artifact (HTML by default, PDF when explicitly
+requested). Never generate multi-file workspaces, READMEs, or state-tracking
+files for the cotización — that is project management, not the agent's job.
+
 ## Code intelligence
 
 Use CodeGraph as the daily first choice for locating symbols, reading related

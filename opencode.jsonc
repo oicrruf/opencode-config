@@ -8,7 +8,7 @@
   "lsp": true,
   "compaction": { "auto": true },
   "agent": {
-    "plan": { "model": "openai/gpt-5.6-terra" },
+    "plan": { "model": "openai/gpt-5.6-terra-fast" },
     "explore": { "model": "openai/gpt-5.6-terra" },
     "adversarial": {
       "model": "openai/gpt-5.6-terra",
@@ -31,6 +31,11 @@
     "qa": {
       "model": "minimax/MiniMax-M3",
       "permission": { "edit": "deny", "bash": "deny" },
+      "tools": { "playwright_*": true }
+    },
+    "cotizador": {
+      "model": "openai/gpt-5.6-terra",
+      "permission": { "edit": "deny", "bash": "ask" },
       "tools": { "playwright_*": true }
     }
   },
@@ -66,7 +71,7 @@
       "command": [
         "npx",
         "-y",
-        "@playwright/mcp",
+        "@playwright/mcp@0.0.81",
         "--browser",
         "chromium"
       ],
