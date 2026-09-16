@@ -1,5 +1,6 @@
 ---
 description: "Implement tasks from an OpenSpec change (Experimental)"
+model: minimax/MiniMax-M3
 ---
 
 Implement tasks from an OpenSpec change.

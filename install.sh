@@ -19,6 +19,13 @@ if [ "${OPENCODE_INSTALL_NERD_FONTS:-1}" != "0" ] && [ -x "$repo_dir/scripts/ins
   fi
 fi
 
+# The global /opsx-* commands and /p5t-init require this CLI. Missing it must
+# not prevent configuration links from being created.
+if [ "${OPENCODE_CHECK_OPENSPEC:-1}" != "0" ] && ! command -v openspec >/dev/null 2>&1; then
+  printf 'Warning: openspec CLI not found on PATH; /opsx-* and /p5t-init will fail.\n' >&2
+  printf 'Install with: npm install -g @fission-ai/openspec (requires Node.js >= 20.19).\n' >&2
+fi
+
 link() {
   local source="$1"
   local target="$2"

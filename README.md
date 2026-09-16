@@ -119,6 +119,18 @@ OpenCode must restart before a newly created index is exposed through MCP.
 Serena starts without an active project and creates project state only when
 `build` activates it for an identified behavior-preserving refactor.
 
+## OpenSpec CLI
+
+The global `/opsx-*` commands and `/p5t-init` require the `openspec` binary.
+Install it once with Node.js 20.19 or newer:
+
+```bash
+npm install -g @fission-ai/openspec
+```
+
+`install.sh` warns if the binary is unavailable. Set `OPENCODE_CHECK_OPENSPEC=0`
+to suppress that warning.
+
 ## Initialize a project
 
 Run the global bootstrap command from a project's repository root:
