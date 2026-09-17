@@ -1,48 +1,174 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "permission": "allow",
+  "permission": {
+    "edit": "ask",
+    "bash": { "*": "ask" },
+    "task": "deny",
+    "external_directory": "deny",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "lsp": "allow"
+  },
   "model": "minimax/MiniMax-M3",
   "small_model": "minimax/MiniMax-M2.7-highspeed",
   "default_agent": "build",
   "autoupdate": "notify",
   "lsp": true,
-  "compaction": { "auto": true },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 6,
+    "preserve_recent_tokens": 4000,
+    "reserved": 2000
+  },
+  "subagent_depth": 1,
+  "tool_output": {
+    "max_lines": 400,
+    "max_bytes": 16384
+  },
   "agent": {
-    "plan": { "model": "openai/gpt-5.6-terra-fast" },
-    "explore": { "model": "openai/gpt-5.6-terra" },
+    "plan": {
+      "model": "openai/gpt-5.6-terra-fast",
+      "steps": 100,
+      "permission": {
+        "edit": "deny",
+        "bash": { "*": "ask" },
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
+    },
+    "explore": {
+      "model": "minimax/MiniMax-M3",
+      "steps": 25,
+      "permission": { "edit": "deny", "bash": "deny", "codegraph_*": "allow" }
+    },
     "adversarial": {
       "model": "openai/gpt-5.6-terra",
-      "permission": { "edit": "deny", "bash": "deny" },
-      "tools": { "serena*": true, "playwright_*": true, "context7_*": true }
+      "steps": 60,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "codegraph_*": "allow",
+        "context7_*": "allow",
+        "playwright_*": "allow"
+      }
     },
     "build": {
       "model": "minimax/MiniMax-M3",
-      "tools": { "serena*": true, "context7_*": true }
+      "steps": 60,
+      "permission": {
+        "edit": "allow",
+        "bash": "ask",
+        "task": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
     },
     "general": {
       "model": "minimax/MiniMax-M3",
-      "tools": { "context7_*": true }
+      "steps": 40,
+      "permission": {
+        "edit": "ask",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
     },
     "frontend": {
       "model": "minimax/MiniMax-M3",
-      "tools": { "playwright_*": true }
+      "steps": 40,
+      "permission": {
+        "edit": "allow",
+        "bash": "ask",
+        "codegraph_*": "allow",
+        "playwright_*": "allow"
+      }
     },
-    "backend": { "model": "minimax/MiniMax-M3" },
+    "backend": {
+      "model": "minimax/MiniMax-M3",
+      "steps": 40,
+      "permission": {
+        "edit": "allow",
+        "bash": "ask",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
+    },
     "qa": {
       "model": "minimax/MiniMax-M3",
-      "permission": { "edit": "deny", "bash": "deny" },
-      "tools": { "playwright_*": true }
+      "steps": 25,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "codegraph_*": "allow",
+        "playwright_*": "allow"
+      }
     },
     "cotizador": {
       "model": "openai/gpt-5.6-terra",
-      "permission": { "edit": "deny", "bash": "ask" },
-      "tools": { "playwright_*": true }
+      "steps": 60,
+      "permission": {
+        "edit": "deny",
+        "bash": "ask",
+        "webfetch": "allow",
+        "codegraph_*": "allow",
+        "playwright_*": "allow"
+      }
+    },
+    "refactor": {
+      "model": "openai/gpt-5.6-terra",
+      "steps": 100,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "git *": "allow",
+          "gh *": "allow",
+          "codegraph *": "allow",
+          "openspec *": "allow"
+        },
+        "external_directory": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow",
+        "serena_*": "allow"
+      }
+    },
+    "architect": {
+      "model": "openai/gpt-5.6-terra",
+      "steps": 100,
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "codegraph *": "allow",
+          "openspec *": "allow",
+          "git *": "allow"
+        },
+        "external_directory": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
+    },
+    "orchestrator": {
+      "model": "openai/gpt-5.6-terra",
+      "steps": 100,
+      "permission": {
+        "edit": "allow",
+        "bash": "ask",
+        "external_directory": "allow",
+        "question": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
+    },
+    "p5t-installer": {
+      "model": "minimax/MiniMax-M3",
+      "steps": 40,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow",
+        "external_directory": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
     }
-  },
-  "tools": {
-    "serena*": false,
-    "playwright_*": false,
-    "context7_*": false
   },
   "mcp": {
     "codegraph": {

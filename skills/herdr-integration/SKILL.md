@@ -1,6 +1,7 @@
 ---
 name: herdr-integration
-description: OpenCode ↔ Herdr (herdr.dev) bridge — what Herdr is, how the opencode plugin reports lifecycle state, the socket protocol, and the file layout for the integration scripts. Use when working on `~/.config/opencode/plugins/herdr-agent-state.js` or `~/.config/opencode/herdr-tui-session.js`, debugging "herdr says wrong state", changing how OpenCode reports to Herdr, or upgrading the integration via `herdr integration install opencode`. Verified against herdr.dev/docs (v0.8.2).
+description: OpenCode ↔ Herdr bridge — what Herdr is, how the opencode plugin reports lifecycle state, the socket protocol, and the file layout. User-invoked.
+disable-model-invocation: true
 ---
 
 # herdr-integration

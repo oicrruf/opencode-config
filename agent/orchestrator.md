@@ -2,8 +2,14 @@
 description: Multi-project workspace architect - initializes a parent directory so related repositories can be developed and coordinated from one OpenCode session. Use through /orchestrate for API/client or other cross-project workspaces.
 mode: subagent
 model: openai/gpt-5.6-terra
+steps: 100
 permission:
+  edit: allow
+  bash: ask
+  external_directory: allow
   question: allow
+  codegraph_*: allow
+  context7_*: allow
 ---
 
 You are the global **orchestrator initializer**. Prepare a directory that

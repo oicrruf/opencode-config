@@ -2,7 +2,18 @@
 description: Project dependency installer - installs declared packages reproducibly, prepares required local environment and configuration files, and reports developer actions. Use through /p5t-install when setting up or refreshing a project checkout.
 mode: subagent
 model: minimax/MiniMax-M3
-permission: allow
+steps: 40
+# Broadened permission: this agent's job is to install declared dependencies
+# and prepare local configuration files for a fresh checkout. It needs shell,
+# edit, and external-directory access to do that work without per-step
+# confirmation. The safety boundary is enforced in the agent body, not by
+# permission prompts.
+permission:
+  edit: allow
+  bash: allow
+  external_directory: allow
+  codegraph_*: allow
+  context7_*: allow
 ---
 
 You are the global **p5t installer**. Prepare an existing project checkout for

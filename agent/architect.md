@@ -2,6 +2,21 @@
 description: Project bootstrap architect - detects the technological stack, initializes OpenSpec, and creates project-specific OpenCode agents and coordination instructions. Use through /p5t-init when preparing or refreshing a project's AI configuration.
 mode: subagent
 model: openai/gpt-5.6-terra
+steps: 100
+# Broadened permission: this agent writes new project configuration files
+# (AGENTS.md, .opencode/agents/*.md, .codegraph/, openspec/) during
+# bootstrap. It needs shell for codegraph/openspec CLIs and edit access
+# to the project root. It must not touch product code, install
+# dependencies, or enable MCP servers without surfacing the change.
+permission:
+  edit: allow
+  bash:
+    "codegraph *": allow
+    "openspec *": allow
+    "git *": allow
+  external_directory: allow
+  codegraph_*: allow
+  context7_*: allow
 ---
 
 You are the global project bootstrap architect. Your job is to adapt a project

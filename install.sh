@@ -4,6 +4,21 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
+# Validate the configuration before linking. The validator enforces the
+# deny-by-default permission baseline, the per-agent MCP gating, and the
+# skill-description budget. Fail loudly so the operator sees the violation.
+if [ -x "$repo_dir/scripts/validate-config.mjs" ]; then
+  if ! node "$repo_dir/scripts/validate-config.mjs"; then
+    printf 'OpenCode configuration validation failed; refusing to link.\n' >&2
+    exit 1
+  fi
+elif [ -f "$repo_dir/scripts/validate-config.mjs" ]; then
+  if ! node "$repo_dir/scripts/validate-config.mjs"; then
+    printf 'OpenCode configuration validation failed; refusing to link.\n' >&2
+    exit 1
+  fi
+fi
+
 mkdir -p "$config_dir"
 
 # Install JetBrainsMono Nerd Font (Linux/macOS only). The PowerShell installer

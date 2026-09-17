@@ -119,6 +119,43 @@ OpenCode must restart before a newly created index is exposed through MCP.
 Serena starts without an active project and creates project state only when
 `build` activates it for an identified behavior-preserving refactor.
 
+## Routing, budgets, and MCPs
+
+Each work request is classified into one of `small`, `medium`,
+`spec-required`, or `audit`. The classification picks a model, a
+subagent depth, and a tool surface. The full matrix lives in
+`agent/routing.md`; the relevant excerpt:
+
+| Class          | Default model                       | Depth | Browser |
+|----------------|-------------------------------------|-------|---------|
+| `small`        | `minimax/MiniMax-M2.7-highspeed`    | 0     | deny    |
+| `medium`       | `minimax/MiniMax-M3`                | 1     | deny    |
+| `spec-required`| Terra (plan) + M3 (implement)       | 1     | only with risk |
+| `audit`        | Terra                               | 1     | required |
+
+`opencode.jsonc` enforces the policy globally:
+
+- `tool_output.max_lines` defaults to `400` and `max_bytes` to `16384`,
+  with a truncation footer that points to the full output on disk.
+- `compaction.prune: true`, `tail_turns: 6`, `preserve_recent_tokens:
+  4000`, `reserved: 2000` so each session compacts predictably.
+- `subagent_depth: 1` globally; only `orchestrator` and `refactor`
+  inherit depth `2` for their bounded units.
+- `permission` is deny-by-default at the baseline; each agent carries
+  its own `permission` block with the minimum tool surface it needs
+  (MCP tools gated by `codegraph_*`, `playwright_*`, `context7_*`,
+  `serena_*`).
+
+Per-agent overrides follow the budget matrix in `agent/routing.md`.
+The `validate-config.mjs` script (run by `install.sh`) enforces that
+no agent exposes an unallowed MCP tool family and that the union of
+skill descriptions stays within the model-invocable budget.
+
+The MCP set still loads at startup; the per-agent `permission` block
+hides the corresponding tool families from agents that should not see
+them. Use `node scripts/validate-config.mjs` to verify the policy
+before committing.
+
 ## OpenSpec CLI
 
 The global `/opsx-*` commands and `/p5t-init` require the `openspec` binary.

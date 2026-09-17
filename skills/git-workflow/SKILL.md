@@ -1,6 +1,7 @@
 ---
 name: git-workflow
-description: Git workflow conventions — atomic commits, branch hygiene, revert strategy, history rewriting, and conflict resolution. Use when committing changes, drafting a PR description, deciding how to split work into commits, recovering from a botched merge, or rebasing. Applies to any project.
+description: Git conventions — atomic commits, branch hygiene, revert strategy, history rewriting, conflict resolution. User-invoked.
+disable-model-invocation: true
 ---
 
 # git-workflow
