@@ -1,0 +1,33 @@
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor/swap files
+*.swp
+*.swo
+*~
+
+# Node dependencies (the nested .opencode/.gitignore covers that subtree).
+node_modules/
+
+# Tool-generated local state, not repository content.
+#   .codegraph/        -> created by `/p5t-init` (agent/architect.md)
+#   .opencode/worktree -> created by the `refactor` agent (agent/refactor.md)
+#   .playwright-mcp/   -> logs/snapshots from the playwright MCP (opencode.jsonc)
+#   .serena/           -> Serena project-local state and cache
+.codegraph/
+.opencode/worktree/
+.playwright-mcp/
+.serena/
+
+# Local environment overrides
+.env
+.env.*
+
+# Local-only skill symlinks (e.g. skills/mmx-cli -> an absolute path in $HOME).
+# Real skills are committed as directories; absolute symlinks break on clone.
+/skills/mmx-cli
+
+# Root-level audit captures from cotización runs (regenerable, ~11MB).
+# Anchored to the root so future committed assets in subdirectories are unaffected.
+/*.png
