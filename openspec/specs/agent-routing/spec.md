@@ -21,6 +21,14 @@ any class defaults to `medium`.
 | `spec-required` | `openai/gpt-5.6-terra` for planning, `minimax/MiniMax-M3` for implementation | 1              | 0–2              | only with explicit risk |
 | `audit`      | `openai/gpt-5.6-terra`    | 1              | 0–1              | required    |
 
+The system SHALL classify a request as `audit` **only** when the user
+explicitly @-mentions `@cotizador` OR explicitly requests a quote
+(cotizar/presupuestar) for the development of an application or a
+development effort. A URL on its own, or a request to improve, redesign,
+migrate, optimize, audit, or evaluate a site without an explicit quoting
+intent, SHALL NOT be classified as `audit` and SHALL NOT dispatch
+`cotizador`.
+
 The system SHALL refuse to delegate deeper than the configured `subagent_depth`
 and SHALL surface a clear blocker when a specialist request would exceed it.
 
@@ -46,6 +54,23 @@ and SHALL surface a clear blocker when a specialist request would exceed it.
   triggers `/opsx-propose`
 - **THEN** the planning step SHALL run on `openai/gpt-5.6-terra` and the
   implementation step SHALL run on `minimax/MiniMax-M3`
+
+#### Scenario: a URL alone does not dispatch cotizador
+
+- **WHEN** the user pastes a URL, or asks to improve, redesign, migrate,
+  optimize, audit, or evaluate a site without explicitly requesting a
+  development quote and without @-mentioning `@cotizador`
+- **THEN** the primary agent SHALL NOT classify the request as `audit` and
+  SHALL NOT dispatch the `cotizador` subagent; it SHALL classify the work
+  as `spec-required` (or route to `adversarial`/`qa` when the ask is review)
+
+#### Scenario: explicit @cotizador mention dispatches the audit
+
+- **WHEN** the user @-mentions `@cotizador` or explicitly asks to quote
+  (cotizar/presupuestar) the development of an application or a development
+  effort, with or without a URL
+- **THEN** the primary agent SHALL classify the request as `audit` and
+  dispatch the `cotizador` subagent
 
 ### Requirement: Terra is reserved for irreversible or ambiguous decisions
 

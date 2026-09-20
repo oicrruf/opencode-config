@@ -134,6 +134,12 @@ subagent depth, and a tool surface. The full matrix lives in
 | `spec-required`| Terra (plan) + M3 (implement)       | 1     | only with risk |
 | `audit`        | Terra                               | 1     | required |
 
+The `audit` class is selected **only** for an explicit `@cotizador` mention or
+an explicit request to quote (cotizar/presupuestar) the development of an
+application or a development effort. A URL on its own — or a request to
+improve, redesign, optimize, audit, or evaluate a site — never selects
+`audit` or dispatches `cotizador`.
+
 `opencode.jsonc` enforces the policy globally:
 
 - `tool_output.max_lines` defaults to `400` and `max_bytes` to `16384`,

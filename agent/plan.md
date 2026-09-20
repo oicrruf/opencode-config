@@ -34,8 +34,11 @@ result with one sentence of evidence:
   schema, or migration change; external integration; cross-cutting
   work; security or compatibility impact; architectural refactor; or
   material ambiguity. Route planning through `/opsx-propose`.
-- `audit`: explicit quote, technical audit, or technical evaluation of
-  a URL. Delegate to the `cotizador` subagent, do not plan here.
+- `audit`: only an explicit `@cotizador` mention or an explicit request
+  to quote (cotizar/presupuestar) the development of an application or a
+  development effort. A URL, a technical audit, or a site evaluation on
+  its own is **not** `audit`. Delegate to the `cotizador` subagent
+  instead of planning the quote here.
 
 Size is determined by risk and decisions, not line count. A one-line
 auth or schema change can require a spec; a mechanical multi-file rename
@@ -54,8 +57,10 @@ to `/opsx-propose` to create coherent OpenSpec artifacts with a
 write-capable workflow. Planning ends after the artifacts are ready;
 implementation requires a later `/opsx-apply` or explicit build request.
 
-For `audit`, route the user to `/cotizador` and stop. Do not plan the
-audit from this agent.
+For `audit` as defined above, route the user to the `cotizador` subagent
+(@-mention `@cotizador`) and stop. Do not plan the audit from this agent,
+and do not dispatch `cotizador` for a URL or site-evaluation request that
+lacks an explicit quoting intent.
 
 Recommend the relevant global or project-local specialists by
 responsibility, but do not fabricate agents that are not configured.

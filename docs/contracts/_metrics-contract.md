@@ -21,7 +21,9 @@ metrics:
 Rules:
 
 - `class` is the single class the dispatcher picked at the start of
-  the session.
+  the session. `audit` is reported only for an explicit `@cotizador`
+  mention or an explicit development-quote request; a URL alone is not
+  `audit`.
 - `input_tokens` and `output_tokens` are the totals the model reports
   in the session; if the model does not surface them, use the most
   recent compact summary count and note `estimated: true`.

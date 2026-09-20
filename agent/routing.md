@@ -14,7 +14,7 @@ exactly one class, and applies the matching row.
 | `small`        | `minimax/MiniMax-M2.7-highspeed`    | 0              | 0                | deny        | inline edits; no specialist dispatch |
 | `medium`       | `minimax/MiniMax-M3`                | 1              | 0–1              | deny        | bounded multi-file work, no durable decision |
 | `spec-required`| `openai/gpt-5.6-terra` (planning) + `minimax/MiniMax-M3` (implementation) | 1 | 0–2 | only with explicit risk | proposal first, then implement |
-| `audit`        | `openai/gpt-5.6-terra`              | 1              | 0–1              | required    | external-facing audit or cotización |
+| `audit`        | `openai/gpt-5.6-terra`              | 1              | 0–1              | required    | explicit `@cotizador` or development-quote request only |
 
 ## Per-agent defaults
 
@@ -54,8 +54,13 @@ with a clear solution and no durable design decision. It is
 `spec-required` for new features, observable behavior changes, API or
 schema changes, migrations, external integrations, cross-cutting work,
 security or compatibility impact, architectural refactors, or material
-ambiguity. It is `audit` only when the user asks for a quote, an external
-audit, or a technical evaluation of a URL.
+ambiguity. It is `audit` **only** when the user explicitly @-mentions
+`@cotizador` or explicitly asks to quote (cotizar/presupuestar) the
+development of an application or a development effort. A URL on its own,
+or a request to improve, redesign, migrate, optimize, audit, or evaluate
+a site without an explicit quoting intent, SHALL NOT be classified as
+`audit` — it is `spec-required` implementation work (or `adversarial`/
+`qa` when the ask is review).
 
 ## Audit modes
 
