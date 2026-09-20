@@ -33,9 +33,10 @@ loaded only at startup.
 ## Nerd Fonts
 
 The TUI quota footer (`quota-tui.tsx`) renders Nerd Font `nf-md-*` icons in the
-bottom bar. Without a Nerd Font installed, those icons render as `` or
-silently disappear. The installer takes care of the font on Linux and macOS; on
-Windows the same step is split into a native PowerShell script.
+bottom bar for the codex, MiniMax, and Ollama Cloud providers. Without a Nerd
+Font installed, those icons render as `` or silently disappear. The installer
+takes care of the font on Linux and macOS; on Windows the same step is split
+into a native PowerShell script.
 
 ### What gets installed
 

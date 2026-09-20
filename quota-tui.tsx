@@ -1,35 +1,62 @@
 /**
- * quota-footer — TUI footer that renders codex + MiniMax quota bars.
+ * quota-footer — TUI footer that renders codex, MiniMax, and Ollama Cloud quota.
  *
  * Prerequisites
  * ------------
- * Both provider CLIs MUST be logged in for their respective bars to
- * render. The plugin does not perform login itself; if a bar is missing,
- * run the matching command in your shell:
+ * For their bars/segments to render:
+ *   - codex: the `codex` CLI MUST be logged in (`codex login`).
+ *   - mmx:   the `mmx` CLI MUST be logged in (`mmx login`).
+ *   - Ollama Cloud: OpenCode MUST be authenticated against Ollama Cloud.
+ *     The credential is read from `<state>/auth.json` → `ollama-cloud`
+ *     (key sent as `Authorization: Bearer` to https://ollama.com/api/usage
+ *     and https://ollama.com/api/me). There is no separate login step for
+ *     the footer — the existing OpenCode authentication is the sole source.
+ *
+ * The plugin does not perform login itself. If a segment is missing or
+ * shows the login label, run the matching command in your shell:
  *
  *   - codex:  `codex login`
  *   - mmx:    `mmx login`   (or the `mmx auth login` subcommand your
  *                           build exposes)
+ *   - Ollama Cloud: sign in to Ollama Cloud from the Ollama app or via
+ *     `ollama signin`; the footer re-reads the credential on each refresh.
  *
- * The TUI icons (`󰧑`, `󰚩`, `󰃖`, `󰀄`) come from a Nerd Font — install
- * `JetBrainsMono Nerd Font` via `scripts/install-nerd-fonts.sh` (Linux,
- * macOS) or `scripts/install-nerd-fonts.ps1` (Windows). See the README
- * "Nerd Fonts" section, then select "JetBrainsMono Nerd Font" in your
- * terminal profile so the icons render correctly.
+ * The TUI icons (`󰧑`, `󰚩`, `󰃖`, `󰀄`, `󰁤`) come from a Nerd Font —
+ * install `JetBrainsMono Nerd Font` via `scripts/install-nerd-fonts.sh`
+ * (Linux, macOS) or `scripts/install-nerd-fonts.ps1` (Windows). See the
+ * README "Nerd Fonts" section, then select "JetBrainsMono Nerd Font" in
+ * your terminal profile so the icons render correctly.
  *
  * Visible footer states
  * ---------------------
- * 1. Fresh data on both sides (e.g. `󰧑 MiniMax 5h ███░░ 50% 0h 2m | 󰚩 Codex ████░ 87% 18d 5h 󰃖`).
+ * 1. Fresh data (e.g.
+ *    `󰧑 MiniMax 5h ███░░ 50% 0h 2m | 󰚩 Codex ████░ 87% 18d 5h 󰃖 | 󰁤 Ollama $2.40  353`).
+ *    The Ollama Cloud segment shows the consumed amount in US dollars — the
+ *    endpoint's `limits.monthly.usage` fraction multiplied by the plan's
+ *    included monthly credit — and the summed request count for the month.
+ *    It deliberately carries no percentage bar and no reset indicator because
+ *    the API exposes neither.
+ *    When the plan's included credit cannot be resolved, the segment renders
+ *    the fraction directly as a percentage instead (e.g. `󰁤 Ollama 4%  353`),
+ *    which is exactly what the endpoint reports and needs no cap.
  * 2. `󰚩 Codex · login` — the codex CLI is not logged in. Run `codex login`.
  * 3. `󰧑 MiniMax requiere login` — the mmx CLI is not logged in. Run `mmx login`.
  * 4. `󰚩 Codex · sin datos` — codex is failing repeatedly for a non-auth
  *    reason (timeout, JSON-RPC error, malformed response). Tail the
  *    `[quota-footer]` warning stream (e.g. from the OpenCode dev
  *    console) for the specific failure reason.
+ * 5. `󰁤 Ollama · login` — the Ollama Cloud credential is missing from
+ *    `<state>/auth.json`, or the API rejected it as unauthorized. Sign
+ *    in to Ollama Cloud; the footer re-reads the credential on each refresh.
  *
  * The MiniMax segment silently disappears on sustained non-auth
  * failures; only auth-required failures are surfaced as a label
- * (state #3 above) so the operator has a clear remediation.
+ * (state #3 above) so the operator has a clear remediation. The Ollama
+ * Cloud segment preserves its last successful value across transient
+ * failures (one `[quota-footer]` warning per cycle) and re-renders
+ * `· login` when the credential is missing or rejected. A plan-resolution
+ * failure is logged at most once per session and degrades the segment to the
+ * percentage form rather than suppressing it.
  *
  * Spec: openspec/specs/tui-quota-footer/spec.md
  *         (and per-change specs under openspec/changes/)
@@ -38,6 +65,9 @@
 /** @jsxImportSource @opentui/solid */
 
 import { spawn } from "node:child_process"
+import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { TuiPlugin, TuiPluginModule, TuiThemeCurrent } from "@opencode-ai/plugin/tui"
 
 const STATE_KEY = "quota-footer.status"
@@ -51,11 +81,50 @@ const MMX_LOGIN_REQUIRED_LABEL = "󰧑 MiniMax requiere login"
 const CODEX_LOG_PREFIX = "[quota-footer]"
 const CODEX_PLAN_BUSINESS_ICON = "󰃖"
 const CODEX_PLAN_PERSONAL_ICON = "󰀄"
+const OLLAMA_CLOUD_ICON = "󰁤"
+const OLLAMA_CLOUD_LOGIN_REQUIRED_LABEL = "󰁤 Ollama · login"
+const OLLAMA_CLOUD_PROVIDER_KEY = "ollama-cloud"
+const OLLAMA_CLOUD_USAGE_URL = "https://ollama.com/api/usage"
+const OLLAMA_CLOUD_ACCOUNT_URL = "https://ollama.com/api/me"
+// Included monthly usage credit per plan, in US dollars, from the pricing
+// page (https://ollama.com/pricing). No API response exposes this cap, so it
+// is maintained here; a plan absent from this table degrades to the
+// percentage form rather than multiplying by a guessed allowance.
+const OLLAMA_CLOUD_ALLOWANCE_BY_PLAN: Record<string, number> = {
+  pro: 60,
+  max: 300,
+  team: 1000,
+}
 
 type FooterState = {
   codex?: string
   minimax?: string
+  ollama?: string
   ready: boolean
+}
+
+type OllamaApiUsage = {
+  limits?: {
+    monthly?: {
+      usage?: unknown
+      models?: ReadonlyArray<{ name?: unknown; request_count?: unknown }>
+    }
+  }
+}
+
+type OllamaApiAccount = {
+  Plan?: unknown
+}
+
+// Per-session plan resolution state. `resolved` separates "not yet attempted"
+// from "attempted and unknown"; `allowance` absent means unknown, which routes
+// the segment to the percentage form; `warned` enforces the one-warning-per-
+// session rule for a plan-resolution failure. Held in the `tui` closure rather
+// than module scope so it never leaks across sessions.
+type OllamaAllowanceState = {
+  resolved: boolean
+  allowance?: number
+  warned: boolean
 }
 
 type MmxQuota = {
@@ -397,9 +466,207 @@ async function readCodex(
   }
 }
 
+// Resolves the absolute path of OpenCode's `auth.json` using the same XDG rule
+// the OpenCode binary applies to its data directory. The plugin API exposes
+// the runtime state dir but not the data dir, so we mirror the rule OpenCode
+// uses at startup (env XDG_DATA_HOME, falling back to ~/.local/share) and
+// append `opencode/auth.json`. This keeps the read resilient to installs that
+// relocate the data directory through XDG_DATA_HOME.
+function resolveAuthJsonPath(): string {
+  const dataHome = process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share")
+  return join(dataHome, "opencode", "auth.json")
+}
+
+// Reads the Ollama Cloud API key that OpenCode keeps in its data directory.
+// Returns the key on success, or `undefined` for every "not available" case
+// (file missing, entry missing, key missing, malformed JSON, read error).
+// The credential is never echoed to logs, warnings, or rendered output: this
+// function returns it as a string so the only call site can place it in the
+// `Authorization` header.
+function loadOllamaCredential(): string | undefined {
+  try {
+    const raw = readFileSync(resolveAuthJsonPath(), "utf8")
+    const data = JSON.parse(raw) as Record<string, unknown>
+    const entry = data[OLLAMA_CLOUD_PROVIDER_KEY]
+    if (!entry || typeof entry !== "object") return undefined
+    const key = (entry as Record<string, unknown>).key
+    if (typeof key !== "string" || key.length === 0) return undefined
+    return key
+  } catch {
+    return undefined
+  }
+}
+
+// `limits.monthly.usage` is the FRACTION of the plan's included monthly credit
+// already consumed (e.g. `0.04` on a `$60` plan = `$2.40`), not a dollar
+// amount. See the change `fix-ollama-usage-units` for the evidence.
+//
+// With a resolved allowance the segment renders dollars. Without one — the
+// plan is unknown, unreadable, or absent from the mapping — it renders the
+// fraction itself as a percentage, which is exactly what the endpoint reports
+// and needs no cap, rather than multiplying by a guessed allowance.
+function formatOllamaFraction(usage: number): string {
+  const rounded = Math.round(usage * 100 * 10) / 10
+  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)
+  return `${text}%`
+}
+
+function formatOllamaUsage(usage: number, requestCount: number, allowance?: number) {
+  const value =
+    allowance === undefined
+      ? formatOllamaFraction(usage)
+      : `$${(usage * allowance).toFixed(2)}`
+  return requestCount > 0
+    ? `${OLLAMA_CLOUD_ICON} Ollama ${value}  ${requestCount}`
+    : `${OLLAMA_CLOUD_ICON} Ollama ${value}`
+}
+
+// Resolves the account plan's included monthly credit. Reads the top-level
+// `Plan` field from the account endpoint and maps it through
+// OLLAMA_CLOUD_ALLOWANCE_BY_PLAN. Returns `undefined` for every unresolvable
+// case (request failure, non-success status, absent or non-string `Plan`,
+// plan not in the mapping table); the caller emits at most one warning per
+// session and falls back to the percentage form.
+async function readOllamaPlan(
+  credential: string,
+  signal: AbortSignal,
+  onFailure?: (reason: string) => void,
+): Promise<number | undefined> {
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  signal.addEventListener("abort", onAbort, { once: true })
+  try {
+    timeoutHandle = setTimeout(() => controller.abort(), COMMAND_TIMEOUT_MS)
+
+    const response = await fetch(OLLAMA_CLOUD_ACCOUNT_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${credential}` },
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      onFailure?.(`HTTP ${response.status}`)
+      return undefined
+    }
+
+    const body = (await response.json()) as OllamaApiAccount
+    const plan = body?.Plan
+    if (typeof plan !== "string" || plan.length === 0) {
+      onFailure?.("no Plan in account response")
+      return undefined
+    }
+    const allowance = OLLAMA_CLOUD_ALLOWANCE_BY_PLAN[plan]
+    if (allowance === undefined) {
+      onFailure?.(`unmapped plan: ${plan}`)
+      return undefined
+    }
+    return allowance
+  } catch (error) {
+    if (signal.aborted) return undefined
+    const reason = error instanceof Error ? error.message : String(error)
+    // `reason` never contains the credential: it is only used in the request
+    // header, never in a message.
+    onFailure?.(reason)
+    return undefined
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    signal.removeEventListener("abort", onAbort)
+  }
+}
+
+async function readOllamaCloud(
+  signal: AbortSignal,
+  allowanceState: OllamaAllowanceState,
+  onFailure?: (reason: string) => void,
+): Promise<string | undefined> {
+  const credential = loadOllamaCredential()
+  if (!credential) return OLLAMA_CLOUD_LOGIN_REQUIRED_LABEL
+
+  // The plan-resolution warning and a usage failure can coincide in one cycle,
+  // but the footer must emit exactly one warning per failed refresh cycle. This
+  // guard collapses both into the cycle's single diagnostic slot; the plan
+  // warning additionally fires at most once per session via `allowanceState`.
+  let warnedThisCycle = false
+  const warn = (reason: string) => {
+    if (warnedThisCycle) return
+    warnedThisCycle = true
+    onFailure?.(reason)
+  }
+
+  // Resolve the plan once per session, before the usage request. A resolved
+  // attempt (success or failure) never re-issues the request; an unresolved
+  // plan leaves `allowance` unset and the segment renders the percentage form.
+  if (!allowanceState.resolved) {
+    allowanceState.allowance = await readOllamaPlan(credential, signal, (reason) => {
+      if (allowanceState.warned) return
+      allowanceState.warned = true
+      warn(`plan resolution failed: ${reason}`)
+    })
+    allowanceState.resolved = true
+  }
+  if (signal.aborted) return undefined
+
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+  signal.addEventListener("abort", onAbort, { once: true })
+  try {
+    timeoutHandle = setTimeout(() => controller.abort(), COMMAND_TIMEOUT_MS)
+
+    const response = await fetch(OLLAMA_CLOUD_USAGE_URL, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${credential}` },
+      signal: controller.signal,
+    })
+
+    if (response.status === 401 || response.status === 403) {
+      // Unauthorized is a fresh label, not a transient failure: do not call
+      // onFailure. The credential itself never appears in the response path.
+      return OLLAMA_CLOUD_LOGIN_REQUIRED_LABEL
+    }
+    if (!response.ok) {
+      warn(`HTTP ${response.status}`)
+      return undefined
+    }
+
+    const body = (await response.json()) as OllamaApiUsage
+    const monthly = body?.limits?.monthly
+    if (!monthly) {
+      warn("no monthly usage in response")
+      return undefined
+    }
+    const usage = monthly.usage
+    if (typeof usage !== "number" || !Number.isFinite(usage)) {
+      warn("usage is not a finite number")
+      return undefined
+    }
+    const models = Array.isArray(monthly.models) ? monthly.models : []
+    const requestCount = models.reduce((sum, model) => {
+      const rc = model?.request_count
+      return sum + (typeof rc === "number" && Number.isFinite(rc) ? rc : 0)
+    }, 0)
+    return formatOllamaUsage(usage, requestCount, allowanceState.allowance)
+  } catch (error) {
+    if (signal.aborted) return undefined
+    const reason = error instanceof Error ? error.message : String(error)
+    // `reason` is the fetch/DOMException message; it never contains the
+    // credential because the credential is only used in the request header.
+    warn(reason)
+    return undefined
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+    signal.removeEventListener("abort", onAbort)
+  }
+}
+
 const tui: TuiPlugin = async (api) => {
   let refreshing = false
   let consecutiveCodexFailures = 0
+  // Per-session Ollama Cloud allowance resolution. Session-scoped by
+  // construction: the closure is created once per `tui` invocation, so the
+  // cache is discarded when the session ends.
+  const ollamaAllowance: OllamaAllowanceState = { resolved: false, warned: false }
   // Spec trace (openspec/changes/fix-quota-stale-state/specs/tui-quota-footer/spec.md):
   // - "Three consecutive failures reach the sentinel": counter increments on `undefined`,
   //   sentinel replaces cached line once counter >= MAX_CONSECUTIVE_FAILURES.
@@ -423,16 +690,52 @@ const tui: TuiPlugin = async (api) => {
   // - "ENOENT for mmx keeps the existing empty-segment behavior": ENOENT returns `null`
   //   which falls through the `minimax === undefined` guard and clears the cached segment,
   //   matching the codex ENOENT semantics.
+  //
+  // Spec trace (openspec/changes/tui-ollama-cloud-usage/specs/tui-quota-footer/spec.md):
+  // - "Credential absent renders login label": `loadOllamaCredential` returns undefined
+  //   for every missing/malformed case; `readOllamaCloud` then returns
+  //   OLLAMA_CLOUD_LOGIN_REQUIRED_LABEL without invoking onFailure.
+  // - "Unauthorized response is not a transient failure": 401/403 returns the login label
+  //   directly (fresh string), so the refresh path replaces the cached segment without
+  //   incrementing any failure counter or emitting a warning.
+  // - "Transient failure logs once and preserves the cached value": any non-auth error
+  //   (timeout, transport error, malformed payload, non-success status, non-finite usage)
+  //   resolves to `undefined`, exactly one `[quota-footer] ollama read failed: <reason>`
+  //   warning is emitted, and the previous Ollama segment is preserved.
+  // - "Successful read replaces the login label": a fresh consumption string from
+  //   `readOllamaCloud` overwrites the cached login label via the same branch.
+  //
+  // Spec trace (openspec/changes/fix-ollama-usage-units/specs/tui-quota-footer/spec.md):
+  // - "Consumption and request count are rendered": `formatOllamaUsage` emits
+  //   `usage × allowance` as dollars when the session record carries an allowance.
+  // - "Consumption is not rendered as the raw fraction": the dollar form is computed
+  //   only from the product, so the unconverted fraction never reaches the label.
+  // - "Unknown plan renders the fraction as a percentage": `readOllamaPlan` returns
+  //   undefined for a missing/unmapped `Plan`, leaving `allowance` unset, and
+  //   `formatOllamaFraction` renders the fraction instead without suppressing the segment.
+  // - "Known plan resolves its included credit" / "Every mapped plan resolves its
+  //   published credit": `OLLAMA_CLOUD_ALLOWANCE_BY_PLAN` maps pro/max/team to 60/300/1000.
+  // - "Plan request failure does not blank a valid segment" / "Allowance is not
+  //   re-requested every cycle": `allowanceState.resolved` short-circuits the plan read
+  //   after the first attempt, and `allowanceState.warned` caps the warning at one
+  //   per session while the usage segment still renders.
+  // - "Plan request never echoes the credential": `readOllamaPlan` places the credential
+  //   only in the request header and passes only the failure reason to onFailure.
+  // - "No percentage bar is rendered" / "No reset indicator is rendered": both formatters
+  //   emit only the icon, `Ollama` label, value, and optional request count.
   const refresh = async () => {
     if (refreshing || api.lifecycle.signal.aborted) return
     refreshing = true
     try {
-      const [codex, minimax] = await Promise.all([
+      const [codex, minimax, ollama] = await Promise.all([
         readCodex(api.lifecycle.signal, (reason) => {
           console.warn(CODEX_LOG_PREFIX, "codex read failed:", reason)
         }),
         readMmx(api.lifecycle.signal, (reason) => {
           console.warn(CODEX_LOG_PREFIX, "mmx read failed:", reason)
+        }),
+        readOllamaCloud(api.lifecycle.signal, ollamaAllowance, (reason) => {
+          console.warn(CODEX_LOG_PREFIX, "ollama read failed:", reason)
         }),
       ])
       if (api.lifecycle.signal.aborted) return
@@ -452,9 +755,14 @@ const tui: TuiPlugin = async (api) => {
         consecutiveCodexFailures = 0
         nextCodex = codex
       }
+      // `readOllamaCloud` returns either a fresh string (consumption or login label)
+      // or `undefined` for transient failures. The previous cached value is preserved on
+      // `undefined`; a fresh string replaces it.
+      const nextOllama = ollama === undefined ? (previous.ollama ?? "") : ollama
       api.kv.set(STATE_KEY, {
         codex: nextCodex,
         minimax: minimax === undefined ? previous.minimax : (minimax ?? ""),
+        ollama: nextOllama,
         ready: true,
       } satisfies FooterState)
     } finally {
@@ -470,7 +778,7 @@ const tui: TuiPlugin = async (api) => {
         const label = () => {
           const value = state()
           if (!value.ready) return "Cuota · consultando..."
-          return [value.codex, value.minimax].filter(Boolean).join(" | ")
+          return [value.codex, value.minimax, value.ollama].filter(Boolean).join(" | ")
         }
         return (
           <box width="100%" flexShrink={0} paddingLeft={3} paddingRight={1} paddingBottom={1}>
