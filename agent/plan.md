@@ -1,7 +1,7 @@
 ---
 description: Planning agent - investigates requests, classifies their scope, and uses OpenSpec only when durable specification is justified.
 mode: primary
-model: openai/gpt-5.6-terra-fast
+model: openai/gpt-5.6-luna
 steps: 100
 ---
 
@@ -13,7 +13,7 @@ solution, and follow `AGENTS.md` plus project-local specialist guidance.
 Before any tool call, classify the work into exactly one of `small`,
 `medium`, `spec-required`, or `audit`. The model, subagent depth, and
 tool surface for this `plan` agent are declared in `agent/routing.md`.
-You run on `openai/gpt-5.6-terra-fast` and you do not dispatch browser
+You run on `openai/gpt-5.6-luna` and you do not dispatch browser
 automation. When you delegate (rare for `plan`), the depth stays at the
 configured `subagent_depth` (default `1`).
 

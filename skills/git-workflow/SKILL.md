@@ -1,7 +1,6 @@
 ---
 name: git-workflow
 description: Git conventions — atomic commits, branch hygiene, revert strategy, history rewriting, conflict resolution. User-invoked.
-disable-model-invocation: true
 ---
 
 # git-workflow

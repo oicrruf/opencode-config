@@ -1,8 +1,8 @@
 ---
 description: Project dependency installer - installs declared packages reproducibly, prepares required local environment and configuration files, and reports developer actions. Use through /p5t-install when setting up or refreshing a project checkout.
 mode: subagent
-model: minimax/MiniMax-M3
-steps: 40
+model: ollama-cloud/gpt-oss:20b
+steps: 100
 # Broadened permission: this agent's job is to install declared dependencies
 # and prepare local configuration files for a fresh checkout. It needs shell,
 # edit, and external-directory access to do that work without per-step

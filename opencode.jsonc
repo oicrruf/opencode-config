@@ -7,10 +7,21 @@
     "external_directory": "deny",
     "webfetch": "ask",
     "websearch": "ask",
-    "lsp": "allow"
+    "lsp": "allow",
+    "skill": {
+      "*": "allow",
+      "archify": "deny",
+      "caveman-commit": "deny",
+      "git-workflow": "deny",
+      "herdr-integration": "deny",
+      "mmx-cli": "deny",
+      "mmx-h3-video": "deny",
+      "router": "deny",
+      "writing-great-skills": "deny"
+    }
   },
   "model": "minimax/MiniMax-M3",
-  "small_model": "minimax/MiniMax-M2.7-highspeed",
+  "small_model": "ollama-cloud/gpt-oss:20b",
   "default_agent": "build",
   "autoupdate": "notify",
   "lsp": true,
@@ -28,7 +39,7 @@
   },
   "agent": {
     "plan": {
-      "model": "openai/gpt-5.6-terra-fast",
+      "model": "openai/gpt-5.6-luna",
       "steps": 100,
       "permission": {
         "edit": "deny",
@@ -38,13 +49,13 @@
       }
     },
     "explore": {
-      "model": "minimax/MiniMax-M3",
+      "model": "ollama-cloud/gpt-oss:20b",
       "steps": 25,
       "permission": { "edit": "deny", "bash": "deny", "codegraph_*": "allow" }
     },
     "adversarial": {
       "model": "openai/gpt-5.6-terra",
-      "steps": 60,
+      "steps": 100,
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -95,7 +106,7 @@
     },
     "qa": {
       "model": "minimax/MiniMax-M3",
-      "steps": 25,
+      "steps": 60,
       "permission": {
         "edit": "deny",
         "bash": "deny",
@@ -105,7 +116,7 @@
     },
     "cotizador": {
       "model": "openai/gpt-5.6-terra",
-      "steps": 60,
+      "steps": 100,
       "permission": {
         "edit": "deny",
         "bash": "ask",
@@ -159,8 +170,8 @@
       }
     },
     "p5t-installer": {
-      "model": "minimax/MiniMax-M3",
-      "steps": 40,
+      "model": "ollama-cloud/gpt-oss:20b",
+      "steps": 100,
       "permission": {
         "edit": "allow",
         "bash": "allow",

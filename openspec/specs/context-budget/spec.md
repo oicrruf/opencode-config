@@ -53,12 +53,17 @@ The system SHALL set `compaction.auto` to `true` and `compaction.prune` to
 The system SHALL set an explicit `steps` value for every agent defined in
 `opencode.jsonc`. The default budget per class is:
 
-| Class                          | Default `steps` |
-|--------------------------------|-----------------|
-| `explore`, `qa` (targeted)     | 25              |
-| `general`, `frontend`, `backend` | 40            |
-| `build`, `cotizador`, `adversarial` (targeted) | 60 |
-| `plan`, `architect`, `refactor`, `orchestrator`, `adversarial` (full), `cotizador` (full) | 100 |
+| Class                                   | Default `steps` |
+|-----------------------------------------|-----------------|
+| `explore`                               | 25              |
+| `general`, `frontend`, `backend`        | 40              |
+| `build`                                 | 60              |
+| `plan`, `architect`, `refactor`, `orchestrator`, `adversarial`, `cotizador`, `p5t-installer` | 100 |
+
+OpenCode accepts exactly one `steps` value per agent, so an agent with
+`targeted` / `full` modes SHALL declare the budget of its **highest**
+mode. `steps` is a ceiling, not a quota: a `targeted` run that completes
+early stops early and does not consume the remaining iterations.
 
 When a session reaches its step limit the agent SHALL emit a structured
 completion summary instead of looping.

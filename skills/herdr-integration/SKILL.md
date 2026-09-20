@@ -1,7 +1,6 @@
 ---
 name: herdr-integration
 description: OpenCode ↔ Herdr bridge — what Herdr is, how the opencode plugin reports lifecycle state, the socket protocol, and the file layout. User-invoked.
-disable-model-invocation: true
 ---
 
 # herdr-integration

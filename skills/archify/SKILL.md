@@ -1,7 +1,6 @@
 ---
 name: archify
 description: Architecture, workflow, sequence, data-flow, and lifecycle diagrams as standalone HTML or Mermaid. User-invoked.
-disable-model-invocation: true
 license: MIT
 metadata:
   version: "2.17"

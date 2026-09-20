@@ -1,11 +1,4 @@
-# agent-routing Specification
-
-## Purpose
-Define a single routing contract that maps work classification to model,
-delegation depth, and allowed tool surface for every global agent, so that
-session cost and capability are predictable from the classification alone.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Work classification drives model and delegation
 
@@ -16,7 +9,7 @@ any class defaults to `medium`.
 
 | Class        | Default model            | Subagent depth | Specialist count | Browser MCP |
 |--------------|--------------------------|----------------|------------------|-------------|
-| `small`      | `ollama-cloud/gpt-oss:20b` | 0              | 0                | deny        |
+| `small`      | `ollama-cloud/gpt-oss:20b` | 0            | 0                | deny        |
 | `medium`     | `minimax/MiniMax-M3`     | 1              | 0–1              | deny        |
 | `spec-required` | `openai/gpt-5.6-terra` for planning, `minimax/MiniMax-M3` for implementation | 1              | 0–2              | only with explicit risk |
 | `audit`      | `openai/gpt-5.6-terra`    | 1              | 0–1              | required    |
@@ -50,7 +43,6 @@ and SHALL surface a clear blocker when a specialist request would exceed it.
 
 #### Scenario: spec-required uses Terra for the proposal only
 
-
 - **WHEN** the user asks for a new API or observable behavior change that
   triggers `/opsx-propose`
 - **THEN** the planning step SHALL run on `openai/gpt-5.6-terra` and the
@@ -82,9 +74,9 @@ role's default output, using only providers the user is authenticated to.
 The tiers are:
 
 - **Decision tier — `openai/gpt-5.6-terra`**: roles whose default output is
-  an irreversible edit, a high-ambiguity structural decision, or an
-  external-facing audit. The roles are `architect`, `orchestrator`,
-  `refactor`, `adversarial`, `cotizador`, and the `/opsx-propose` command.
+  an irreversible edit, a high-ambiguity decision, or an external-facing
+  audit. The roles are `architect`, `orchestrator`, `refactor`,
+  `adversarial`, `cotizador`, and the `/opsx-propose` command.
 - **Planning tier — `openai/gpt-5.6-luna`**: the `plan` agent, which
   triages, investigates, and classifies scope on every request but produces
   a classification that is cheap to revise.
@@ -120,6 +112,12 @@ follows.
   adversarial review is a pre-commit gate where a missed finding costs more
   than the token delta
 
+#### Scenario: plan does not run on the decision tier
+
+- **WHEN** the `plan` agent is dispatched
+- **THEN** the configured model SHALL be `openai/gpt-5.6-luna` and SHALL NOT
+  be `openai/gpt-5.6-terra`
+
 #### Scenario: the propose command runs on the decision tier
 
 - **WHEN** `/opsx-propose` is invoked from a session whose agent is `plan`
@@ -127,98 +125,3 @@ follows.
 - **THEN** the command SHALL declare `model: openai/gpt-5.6-terra` and the
   proposal SHALL be generated on Terra, not on the invoking agent's cheaper
   model
-
-#### Scenario: plan does not run on the decision tier
-
-- **WHEN** the `plan` agent is dispatched
-- **THEN** the configured model SHALL be `openai/gpt-5.6-luna` and SHALL NOT
-  be `openai/gpt-5.6-terra`
-
-### Requirement: Subagent depth is bounded and auditable
-
-The system SHALL set `subagent_depth` to `1` by default and SHALL allow a
-value of `2` only for the `orchestrator` and `refactor` agents. When a
-subagent attempts to delegate, the system SHALL refuse and return a
-structured error that names the offending call.
-
-#### Scenario: nested delegation is rejected
-
-- **WHEN** a subagent invokes the `task` tool to dispatch another agent while
-  `subagent_depth` is `1`
-- **THEN** the system SHALL refuse the delegation and SHALL return an error
-  whose message names the depth limit and the agent that would have been
-  dispatched
-
-### Requirement: Audit roles expose targeted and full modes
-
-The `qa`, `adversarial`, and `cotizador` agents SHALL each support a
-`mode` parameter with values `targeted` (default) and `full`. In `targeted`
-mode the agent runs the minimal verification or audit required for the
-declared scope; in `full` mode the agent expands surface to lint, types,
-tests, coverage, accessibility, security, performance, and Playwright crawl.
-
-The system SHALL require an explicit user request OR a documented risk
-signal (security change, schema migration, external-facing artifact, or
-open incident) before switching an audit role to `full`.
-
-#### Scenario: adversarial stays targeted unless asked
-
-- **WHEN** the user requests "revisa estos cambios" without specifying an
-  audit depth
-- **THEN** the `adversarial` agent SHALL default to `targeted` mode and SHALL
-  scan only the axes directly relevant to the changed files
-
-#### Scenario: cotizador upgrades to full on confirmed scope
-
-- **WHEN** the user has confirmed the URL, client, final client, scope, rate,
-  currency, validity, payment terms, exclusions, and access details
-- **THEN** `cotizador` MAY switch to `full` mode and crawl up to the documented
-  page budget
-
-### Requirement: Specialist dispatch contract
-
-When a primary agent dispatches a specialist via the `task` tool, the
-dispatch payload SHALL include: the work classification, the relevant files
-or symbols, the expected outcome, any user constraints, and the verification
-criteria. The specialist SHALL return only: classification, decision,
-changed files, verification results, blockers, and any OpenSpec task impact.
-
-#### Scenario: build dispatches frontend with full contract
-
-- **WHEN** the `build` agent decides a frontend specialist is needed for a
-  bounded UI change
-- **THEN** the dispatch payload SHALL include the classification (`small`,
-  `medium`, or `spec-required`), the affected files, the expected output, and
-  the verification criteria, and SHALL NOT include the full conversation
-  history
-
-### Requirement: Configured model ids resolve against authenticated providers
-
-The system SHALL declare only model ids that an authenticated provider
-serves. `scripts/validate-config.mjs` SHALL verify every `model:` value in
-`agent/*.md`, every `agent.*.model` in `opencode.jsonc`, every `model:` in
-`commands/*.md`, and `opencode.jsonc.small_model` against the OpenCode
-models catalog.
-
-The check SHALL treat a missing catalog as a skip with a printed notice and
-SHALL NOT fail the install, so a machine that has never started OpenCode
-still installs. The check SHALL fail with the offending file and id when the
-catalog is present and the id is absent.
-
-#### Scenario: a phantom model id fails the validator
-
-- **WHEN** `scripts/validate-config.mjs` runs on a config where an agent
-  declares `openai/gpt-5.6-terra-fast`
-- **THEN** the script SHALL exit non-zero, name the agent, and name the
-  unresolved id
-
-#### Scenario: a valid model id passes the validator
-
-- **WHEN** every configured id is present in the catalog for its provider
-- **THEN** the script SHALL report `validate-config: OK` and exit zero
-
-#### Scenario: a missing catalog skips the check
-
-- **WHEN** `~/.cache/opencode/models.json` does not exist
-- **THEN** the script SHALL print a skip notice for the catalog check and
-  SHALL NOT fail on it

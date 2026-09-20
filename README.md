@@ -153,7 +153,10 @@ improve, redesign, optimize, audit, or evaluate a site — never selects
   (MCP tools gated by `codegraph_*`, `playwright_*`, `context7_*`,
   `serena_*`).
 
-Per-agent overrides follow the budget matrix in `agent/routing.md`.
+Per-agent overrides follow the budget matrix in `agent/routing.md`. An
+agent with `targeted` / `full` modes declares the `steps` budget of its
+highest mode (`agent/routing.md` carries the full table); `steps` is a
+ceiling, so a `targeted` run that finishes early stops early.
 The `validate-config.mjs` script (run by `install.sh`) enforces that
 no agent exposes an unallowed MCP tool family and that the union of
 skill descriptions stays within the model-invocable budget.

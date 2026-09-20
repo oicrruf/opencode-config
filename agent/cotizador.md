@@ -2,7 +2,7 @@
 description: Auditor técnico de sitios web — evalúa [URL] técnicamente (performance, SEO, a11y, seguridad, stack y contenido) y mapea hallazgos a ítems de trabajo con horas. Devuelve hallazgos estructurados a Build, que compone la cotización formal. Use SOLO cuando el usuario @-mencione @cotizador o pida de forma explícita cotizar/presupuestar el desarrollo de una aplicación o un trabajo de desarrollo. Una URL, una auditoría o un pedido de mejora/evaluación de un sitio NO activan este agente por sí solos.
 mode: subagent
 model: openai/gpt-5.6-terra
-steps: 60
+steps: 100
 permission:
   edit: deny
   bash: ask

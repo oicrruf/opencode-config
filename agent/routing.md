@@ -11,10 +11,28 @@ exactly one class, and applies the matching row.
 
 | Class          | Default model                       | Subagent depth | Specialist count | Browser MCP | Notes |
 |----------------|-------------------------------------|----------------|------------------|-------------|-------|
-| `small`        | `minimax/MiniMax-M2.7-highspeed`    | 0              | 0                | deny        | inline edits; no specialist dispatch |
+| `small`        | `ollama-cloud/gpt-oss:20b`          | 0              | 0                | deny        | inline edits; no specialist dispatch |
 | `medium`       | `minimax/MiniMax-M3`                | 1              | 0–1              | deny        | bounded multi-file work, no durable decision |
 | `spec-required`| `openai/gpt-5.6-terra` (planning) + `minimax/MiniMax-M3` (implementation) | 1 | 0–2 | only with explicit risk | proposal first, then implement |
 | `audit`        | `openai/gpt-5.6-terra`              | 1              | 0–1              | required    | explicit `@cotizador` or development-quote request only |
+
+## Model tiers
+
+Models follow decision weight. Every id must resolve against a provider
+authenticated in `auth.json`; `scripts/validate-config.mjs` enforces it.
+
+| Tier      | Model                          | In / Out (USD per M) | Roles |
+|-----------|--------------------------------|----------------------|-------|
+| Decision  | `openai/gpt-5.6-terra`         | $2 / $12             | `architect`, `orchestrator`, `refactor`, `adversarial`, `cotizador`, `/opsx-propose` |
+| Planning  | `openai/gpt-5.6-luna`          | $0.2 / $1.2          | `plan` (triage only) |
+| Execution | `minimax/MiniMax-M3`           | $0.3 / $1.2          | `build`, `general`, `frontend`, `backend`, `qa` |
+| Value     | `ollama-cloud/gpt-oss:20b`     | $0.07 / $0.3         | `explore`, `p5t-installer`, `small_model` |
+
+A command that produces a durable planning artifact runs on the **decision**
+tier even when its invoking agent runs cheaper: the artifact's quality sets
+the ceiling for the implementation that follows. `/opsx-propose` is the case
+in point — `plan` invokes it on luna, but the proposal itself is generated on
+terra.
 
 ## Per-agent defaults
 
@@ -23,22 +41,26 @@ inherits from the class.
 
 | Agent                | Default model            | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
 |----------------------|--------------------------|---------|-------------|-----------|--------|----------|
-| `plan`               | `openai/gpt-5.6-terra-fast` | 100     | deny        | allow     | deny   | allow     |
+| `plan`               | `openai/gpt-5.6-luna`    | 100     | deny        | allow     | deny   | allow     |
 | `build`              | `minimax/MiniMax-M3`     | 60      | deny        | allow     | deny   | allow     |
 | `general`            | `minimax/MiniMax-M3`     | 40      | deny        | allow     | deny   | allow     |
-| `explore`            | `minimax/MiniMax-M3`     | 25      | deny        | allow     | deny   | deny      |
+| `explore`            | `ollama-cloud/gpt-oss:20b` | 25    | deny        | allow     | deny   | deny      |
 | `architect`          | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `orchestrator`       | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `refactor`           | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | allow  | allow     |
 | `frontend`           | `minimax/MiniMax-M3`     | 40      | allow       | allow     | deny   | deny      |
 | `backend`            | `minimax/MiniMax-M3`     | 40      | deny        | allow     | deny   | allow     |
-| `qa` (targeted)      | `minimax/MiniMax-M3`     | 25      | allow       | allow     | deny   | deny      |
-| `qa` (full)          | `openai/gpt-5.6-terra`   | 60      | allow       | allow     | deny   | allow     |
-| `adversarial` (targeted) | `openai/gpt-5.6-terra` | 60   | deny        | allow     | deny   | allow     |
-| `adversarial` (full) | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
-| `cotizador` (targeted) | `openai/gpt-5.6-terra` | 60   | deny        | allow     | deny   | deny      |
-| `cotizador` (full)   | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |
-| `p5t-installer`      | `minimax/MiniMax-M3`     | 40      | deny        | allow     | deny   | allow     |
+| `qa`                 | `minimax/MiniMax-M3`     | 60      | allow       | allow     | deny   | deny      |
+| `adversarial`        | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
+| `cotizador`          | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |
+| `p5t-installer`      | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
+
+`steps` is a **ceiling**, not a quota. OpenCode accepts exactly one
+`steps` value per agent, so the audit roles (`qa`, `adversarial`,
+`cotizador`) declare the budget of their highest mode: a `targeted` run
+that finishes early simply stops early and does not spend the remaining
+iterations. `steps` therefore tracks the worst-case surface, while the
+`mode` parameter controls how much of that surface is actually used.
 
 ## Classification gate
 

@@ -14,6 +14,8 @@
 //   6. The agent-routing matrix in `agent/routing.md` references an existing
 //      `agent/build.md`.
 //   7. The `install.sh` references the validator before the link calls.
+//   8. Every configured `provider/model` id resolves against the OpenCode
+//      models catalog (`~/.cache/opencode/models.json`) when it is present.
 //
 // Exit code 0 when all checks pass, non-zero otherwise. Each failure names
 // the file and the offending line so the operator can fix it directly.
@@ -21,6 +23,7 @@
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
@@ -142,13 +145,31 @@ if (existsSync(cfgPath)) {
 }
 
 // Check 5: model-invoked skill description budget and duplicate clauses.
+//
+// The hidden set is derived from the `deny` patterns under
+// `permission.skill` in opencode.jsonc — the mechanism opencode actually
+// implements. A skill-declared `disable-model-invocation` flag is NOT
+// trusted: opencode ignores unknown frontmatter fields, so honouring the
+// flag here made the validator certify a budget it was not measuring.
+const deniedSkills = new Set();
+if (existsSync(cfgPath)) {
+  const cfg = readJsonc(cfgPath);
+  const skillPerm = cfg.permission && cfg.permission.skill;
+  if (skillPerm && typeof skillPerm === 'object') {
+    for (const [name, action] of Object.entries(skillPerm)) {
+      if (name !== '*' && action === 'deny') deniedSkills.add(name);
+    }
+  }
+}
+
 const skillFiles = listSkillFiles();
 let totalDescChars = 0;
 const descClauses = [];
 for (const file of skillFiles) {
   const fm = readFrontmatter(file);
   if (!fm) continue;
-  if (fm['disable-model-invocation'] === 'true' || fm['disable-model-invocation'] === true) continue;
+  const name = typeof fm.name === 'string' ? fm.name : '';
+  if (deniedSkills.has(name)) continue;
   const desc = typeof fm.description === 'string' ? fm.description : '';
   totalDescChars += desc.length;
   // Collect clauses (sentences or comma-separated fragments) of >= 12 words.
@@ -168,6 +189,25 @@ for (const { file, clause } of descClauses) {
     fail(file, `duplicate description clause '${clause.slice(0, 60)}...' also in ${relative(repoRoot, seen.get(clause).file)}`);
   } else {
     seen.set(clause, { file });
+  }
+}
+
+// Check 5b: every skill path a wrapper command injects exists on disk, so a
+// renamed or removed skill fails validation instead of silently injecting
+// nothing.
+const commandsDir = join(repoRoot, 'commands');
+if (existsSync(commandsDir)) {
+  const injected = /!\s*`cat\s+~\/\.config\/opencode\/skills\/([^\s`]+)`/g;
+  for (const f of readdirSync(commandsDir).filter((n) => n.endsWith('.md'))) {
+    const file = join(commandsDir, f);
+    const text = readFileSync(file, 'utf8');
+    for (const match of text.matchAll(injected)) {
+      const rel = match[1];
+      const onDisk = join(repoRoot, 'skills', rel);
+      if (!existsSync(onDisk)) {
+        fail(file, `injects '${rel}' but skills/${rel} does not exist`);
+      }
+    }
   }
 }
 
@@ -194,6 +234,69 @@ if (existsSync(installPath)) {
   const firstLinkIdx = installText.indexOf('link "$repo_dir/opencode.jsonc"');
   if (validatorIdx > firstLinkIdx) {
     fail(installPath, 'validator must run before the first link call in install.sh');
+  }
+}
+
+// Check 8: every configured provider/model id resolves against the catalog.
+//
+// Collects the model ids from agent frontmatter, the `model:` values in
+// commands/*.md, and opencode.jsonc (`agent.*.model` plus `small_model`).
+// A missing or unparseable catalog is a skip with a printed notice, so a
+// machine that has never started OpenCode still installs.
+function collectModelIds() {
+  const found = [];
+  for (const file of listAgentFiles()) {
+    const fm = readFrontmatter(file);
+    if (fm && typeof fm.model === 'string') found.push({ file, id: fm.model });
+  }
+  const commandsDir = join(repoRoot, 'commands');
+  if (existsSync(commandsDir)) {
+    for (const f of readdirSync(commandsDir).filter((n) => n.endsWith('.md'))) {
+      const file = join(commandsDir, f);
+      const fm = readFrontmatter(file);
+      if (fm && typeof fm.model === 'string') found.push({ file, id: fm.model });
+    }
+  }
+  if (existsSync(cfgPath)) {
+    const cfg = readJsonc(cfgPath);
+    if (typeof cfg.small_model === 'string') {
+      found.push({ file: cfgPath, id: cfg.small_model });
+    }
+    for (const [name, value] of Object.entries(cfg.agent || {})) {
+      if (value && typeof value === 'object' && typeof value.model === 'string') {
+        found.push({ file: cfgPath, id: value.model, agent: name });
+      }
+    }
+  }
+  return found;
+}
+
+const catalogPath = join(homedir(), '.cache', 'opencode', 'models.json');
+if (!existsSync(catalogPath)) {
+  console.log(`validate-config: skip — models catalog not found at ${catalogPath}`);
+} else {
+  let catalog = null;
+  try {
+    catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
+  } catch {
+    console.log(`validate-config: skip — models catalog at ${catalogPath} is not parseable`);
+  }
+  if (catalog) {
+    for (const { file, id, agent } of collectModelIds()) {
+      const slash = id.indexOf('/');
+      if (slash <= 0) {
+        fail(file, `${agent ? `agent.${agent}: ` : ''}model '${id}' is not a 'provider/model' id`);
+        continue;
+      }
+      const provider = id.slice(0, slash);
+      const modelId = id.slice(slash + 1);
+      const entry = catalog[provider];
+      if (!entry) {
+        fail(file, `${agent ? `agent.${agent}: ` : ''}model '${id}' names provider '${provider}' that is not in the catalog`);
+      } else if (!entry.models || !entry.models[modelId]) {
+        fail(file, `${agent ? `agent.${agent}: ` : ''}model '${id}' is not served by provider '${provider}'`);
+      }
+    }
   }
 }
 

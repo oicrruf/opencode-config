@@ -3,7 +3,6 @@ name: caveman-commit
 description: >
   Conventional Commits message compressed to intent. User-invoked
   (caveman-commit, /caveman-commit, /commit).
-disable-model-invocation: true
 ---
 
 Write commit messages terse and exact. Conventional Commits format. No fluff. Why over what.

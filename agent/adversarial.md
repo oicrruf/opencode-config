@@ -2,7 +2,7 @@
 description: Adversarial reviewer. Read-only audit of code, config, content. Finds security flaws, broken assumptions, edge cases, perf regressions, a11y gaps. Use for "revisa", "verifica los cambios", before commits, before deploys.
 mode: subagent
 model: openai/gpt-5.6-terra
-steps: 60
+steps: 100
 permission:
   edit: deny
   bash: deny
