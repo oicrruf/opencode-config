@@ -34,11 +34,23 @@ if [ "${OPENCODE_INSTALL_NERD_FONTS:-1}" != "0" ] && [ -x "$repo_dir/scripts/ins
   fi
 fi
 
-# The global /opsx-* commands and /p5t-init require this CLI. Missing it must
-# not prevent configuration links from being created.
+# Track which prerequisites are missing so the final warning block can list
+# every missing dependency with its remediation hint. The installer never
+# installs `lazygit` or `lazydocker`; that responsibility moved to the
+# `doctor` subagent and to `scripts/doctor.mjs --apply-safe`.
+missing_deps=()
+
 if [ "${OPENCODE_CHECK_OPENSPEC:-1}" != "0" ] && ! command -v openspec >/dev/null 2>&1; then
-  printf 'Warning: openspec CLI not found on PATH; /opsx-* and /p5t-init will fail.\n' >&2
-  printf 'Install with: npm install -g @fission-ai/openspec (requires Node.js >= 20.19).\n' >&2
+  missing_deps+=("openspec CLI — install with: npm install -g @fission-ai/openspec (requires Node.js >= 20.19). /opsx-* and /p5t-init will fail until it is on PATH.")
+fi
+
+if [ "${OPENCODE_CHECK_LAZY_TOOLS:-1}" != "0" ]; then
+  if ! command -v lazygit >/dev/null 2>&1; then
+    missing_deps+=("lazygit — run /doctor (or \`node scripts/doctor.mjs --apply-safe\`) to install via Homebrew (macOS) or apt/dnf/pacman (Linux).")
+  fi
+  if ! command -v lazydocker >/dev/null 2>&1; then
+    missing_deps+=("lazydocker — run /doctor (or \`node scripts/doctor.mjs --apply-safe\`) to install via Homebrew (macOS) or the official Linux installer script.")
+  fi
 fi
 
 link() {
@@ -68,3 +80,13 @@ if [ -L "$config_dir/plugins/autonomy.js" ]; then
 fi
 
 printf 'OpenCode configuration linked from %s\n' "$repo_dir"
+
+# Final non-fatal reminder. The configuration links are created regardless
+# of the missing tools; the operator decides whether to invoke /doctor.
+if [ "${OPENCODE_DOCTOR:-1}" != "0" ] && [ "${#missing_deps[@]}" -gt 0 ]; then
+  printf '\ndoctor: %s prerequisite(s) missing — run /doctor for a full diagnosis.\n' "${#missing_deps[@]}" >&2
+  for dep in "${missing_deps[@]}"; do
+    printf '  - %s\n' "$dep" >&2
+  done
+  printf 'doctor: invoke `/doctor` or `node scripts/doctor.mjs --apply-safe` to repair. Set OPENCODE_DOCTOR=0 to silence this warning.\n' >&2
+fi

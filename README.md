@@ -93,6 +93,50 @@ scripts/install-nerd-fonts.sh --offline /path/to/JetBrainsMono.zip
 powershell -ExecutionPolicy Bypass -File scripts\install-nerd-fonts.ps1 -Offline C:\path\to\JetBrainsMono.zip
 ```
 
+## Diagnose and repair (`/doctor`)
+
+The global `doctor` subagent inspects the host, the configuration
+symlinks, the OpenSpec change state, and the declared MCPs, then prints
+a single report with one of four levels per finding: `ok`, `warn`,
+`fail`, or `requires-approval`. Use it after `install.sh`, after
+pulling changes, or whenever a command complains about missing tools.
+
+### Modes
+
+- `/doctor` or `node scripts/doctor.mjs --check-only` (default) —
+  reads the filesystem and exits non-zero only when a `fail` is
+  found. Never installs anything and never relinks.
+- `/doctor --apply-safe` or `node scripts/doctor.mjs --apply-safe` —
+  installs missing `lazygit`/`lazydocker` via the detected package
+  manager, recreates missing `~/.config/opencode/<entry>` symlinks
+  from the clone, and re-runs `scripts/validate-config.mjs`. Add
+  `--dry-run` to print the actions without executing them. The
+  repairs are idempotent.
+
+### What the report covers
+
+- **Tooling prerequisites** — `lazygit`, `lazydocker`, `openspec`,
+  `codegraph`, `serena`. Missing entries are `fail`; the report
+  prints the matching remediation line.
+- **Symlinks under `~/.config/opencode`** — every entry that
+  `install.sh` links is checked; missing or non-symlink paths are
+  `fail`.
+- **OpenSpec change state** — any change with pending tasks is
+  reported as `requires-approval` with the exact `/opsx-apply <name>`
+  invocation. The doctor never applies an OpenSpec change on its
+  own.
+- **MCP configuration** — disabled MCPs are reported as
+  `requires-approval` (the doctor never flips `enabled: true`); MCPs
+  enabled but unreferenced by any agent permission are `warn`.
+- **Configuration validator** — the same checks `install.sh` runs
+  (`scripts/validate-config.mjs`).
+
+### Opt-out
+
+Set `OPENCODE_DOCTOR=0` before running `install.sh` to silence the
+final "doctor: prerequisite(s) missing" reminder. The configuration
+links are always created regardless of the warning.
+
 ## Update
 
 ```bash

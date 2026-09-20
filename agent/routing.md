@@ -54,6 +54,7 @@ inherits from the class.
 | `adversarial`        | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
 | `cotizador`          | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |
 | `p5t-installer`      | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
+| `doctor`             | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
 
 `steps` is a **ceiling**, not a quota. OpenCode accepts exactly one
 `steps` value per agent, so the audit roles (`qa`, `adversarial`,

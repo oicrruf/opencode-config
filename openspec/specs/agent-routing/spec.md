@@ -91,11 +91,11 @@ The tiers are:
 - **Execution tier — `minimax/MiniMax-M3`**: `build`, `general`, `frontend`,
   `backend`, and `qa`.
 - **Value tier — `ollama-cloud/gpt-oss:20b`**: `explore`, `p5t-installer`,
-  and the global `small_model`.
+  `doctor`, and the global `small_model`.
 
 The system SHALL NOT assign `openai/gpt-5.6-terra` as the default model for
-`plan`, `explore`, `build`, `general`, `frontend`, `backend`, `qa`, or
-`p5t-installer`.
+`plan`, `explore`, `build`, `general`, `frontend`, `backend`, `qa`,
+`p5t-installer`, or `doctor`.
 
 OpenCode exposes exactly one static `model` per agent, so a mode-dependent
 model is not expressible. The system SHALL therefore assign Terra to
@@ -134,17 +134,32 @@ follows.
 - **THEN** the configured model SHALL be `openai/gpt-5.6-luna` and SHALL NOT
   be `openai/gpt-5.6-terra`
 
+#### Scenario: doctor runs on the value tier
+
+- **WHEN** the global `doctor` subagent is dispatched
+- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
+  SHALL NOT be `openai/gpt-5.6-terra`, because the doctor's role is
+  read-only inspection and safe repair, not irreversible decisions
+
 ### Requirement: Subagent depth is bounded and auditable
 
 The system SHALL set `subagent_depth` to `1` by default and SHALL allow a
 value of `2` only for the `orchestrator` and `refactor` agents. When a
-subagent attempts to delegate, the system SHALL refuse and return a
-structured error that names the offending call.
+subagent, including `doctor`, attempts to delegate, the system SHALL refuse
+and return a structured error that names the offending call.
 
 #### Scenario: nested delegation is rejected
 
 - **WHEN** a subagent invokes the `task` tool to dispatch another agent while
   `subagent_depth` is `1`
+- **THEN** the system SHALL refuse the delegation and SHALL return an error
+  whose message names the depth limit and the agent that would have been
+  dispatched
+
+#### Scenario: doctor refuses to dispatch nested specialists
+
+- **WHEN** the `doctor` subagent invokes the `task` tool to dispatch another
+  agent while `subagent_depth` is `1`
 - **THEN** the system SHALL refuse the delegation and SHALL return an error
   whose message names the depth limit and the agent that would have been
   dispatched
