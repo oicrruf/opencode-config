@@ -21,6 +21,15 @@ validators.
   The `agent-routing` spec (`openspec/specs/agent-routing/spec.md`) is the
   contract for routing decisions; profile edits that change model
   assignments MUST keep the spec aligned.
+- **Line endings.** The repository declares `* text=auto eol=lf` in
+  `.gitattributes` so every shell and runtime file (`*.sh`, `*.ps1`,
+  `*.mjs`, `*.js`, `*.ts`, `*.tsx`, `*.cjs`, `*.mts`, `*.cts`) is LF
+  on every checkout, regardless of `core.autocrlf` on the contributor's
+  machine. `scripts/validate-config.mjs` enforces the contract on the
+  Git index (check #9): a CRLF blob in any of those extensions fails
+  validation. If you need to re-normalize a single file, run
+  `git add --renormalize <path>`; for the whole tree, run
+  `git add --renormalize .`.
 
 ## Installation model profiles
 

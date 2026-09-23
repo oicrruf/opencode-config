@@ -56,6 +56,20 @@ powershell -ExecutionPolicy Bypass -File $HOME\Projects\opencode-config\scripts\
 # Then create the configuration links by hand or run install.sh under WSL.
 ```
 
+The four supported shells and the exact one-line invocation per shell are
+documented in `bash ./install.sh --help`. The supported matrix is:
+
+- **Linux bash (native):** `bash ./install.sh --profile personal`
+- **macOS bash (native):** `bash ./install.sh --profile personal`
+- **WSL Ubuntu bash:** `bash ./install.sh --profile personal` (the installer
+  translates the path with `wslpath -w` before invoking `node.exe`)
+- **Git Bash on Windows:** `bash ./install.sh --profile personal` (the
+  installer translates the path with `cygpath -w` before invoking `node.exe`)
+
+PowerShell-native users launch one of the bash shells above (Git Bash from
+PowerShell is the canonical Windows path; WSL Ubuntu is the alternative).
+The installer is a bash script; it does not run natively in PowerShell.
+
 Restart OpenCode after installing or pulling changes, because configuration is
 loaded only at startup.
 

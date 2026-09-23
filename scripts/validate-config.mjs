@@ -38,6 +38,7 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
@@ -187,6 +188,71 @@ function resolveProfileName(manifest) {
 // validator; the rendered-config path uses a different file but the checks
 // themselves apply to whichever JSONC is in scope).
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Check 9: LF line endings for shell and runtime files in the Git index.
+// ---------------------------------------------------------------------------
+//
+// Reads every tracked file in the Git index and fails when any file with a
+// shell or runtime extension has CRLF line endings. The check inspects the
+// Git index (via `git show :<path>`) rather than the working tree, so the
+// result reflects what is committed, not what the operator's local
+// `core.autocrlf` materialized on disk.
+//
+// `.gitattributes` (`* text=auto eol=lf`) declares the contract; this check
+// enforces it on the artifacts the installer actually parses.
+
+const CRLF_BYTES = Buffer.from([0x0d, 0x0a]);
+const SHELL_RUNTIME_EXTS = new Set([
+  '.sh', '.ps1', '.mjs', '.js', '.ts', '.tsx', '.cjs', '.mts', '.cts',
+]);
+
+function runLineEndingChecks() {
+  let filesBuf;
+  try {
+    filesBuf = execFileSync('git', ['ls-files', '-z'], {
+      cwd: repoRoot,
+      encoding: 'buffer',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch (e) {
+    // git not on PATH or repo not a git repo: skip silently. The other
+    // checks still report their findings.
+    return;
+  }
+  const files = filesBuf.toString('utf8').split('\u0000').filter(Boolean);
+
+  for (const rel of files) {
+    if (rel.includes('node_modules/')) continue;
+    const lower = rel.toLowerCase();
+    let matched = false;
+    for (const ext of SHELL_RUNTIME_EXTS) {
+      if (lower.endsWith(ext)) { matched = true; break; }
+    }
+    if (!matched) continue;
+
+    let blob;
+    try {
+      blob = execFileSync('git', ['show', `:${rel}`], {
+        cwd: repoRoot,
+        encoding: null,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch (e) {
+      // File present in ls-files but missing in the index (e.g. submodule
+      // with unpopulated contents): skip.
+      continue;
+    }
+    if (!blob || blob.length === 0) continue;
+
+    if (blob.includes(CRLF_BYTES)) {
+      fail(
+        join(repoRoot, rel),
+        'file has CRLF line endings; repository requires LF (see .gitattributes)',
+      );
+    }
+  }
+}
 
 function runStructuralChecks() {
   // Check 1: no deprecated `tools:` block in any agent file.
@@ -503,6 +569,7 @@ runStructuralChecks();
 runSkillBudgetChecks();
 runInstallScriptChecks();
 runProfileChecks();
+runLineEndingChecks();
 
 if (errors.length === 0) {
   console.log('validate-config: OK');

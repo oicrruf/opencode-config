@@ -2,6 +2,32 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Translate $repo_dir to a Windows path when running under WSL or Git Bash,
+# so node.exe (a Windows binary on $PATH) can read the manifest and template.
+# Native Linux/macOS users are unaffected because the case doesn't match.
+# The translated path uses forward slashes (not backslashes) so that
+# subsequent path concatenation like "$repo_dir/config/..." stays clean;
+# node.exe / Win32 accept forward slashes natively.
+case "$repo_dir" in
+  /mnt/[a-zA-Z]/*)
+    if command -v wslpath >/dev/null 2>&1; then
+      repo_dir="$(wslpath -w "$repo_dir")"
+    elif command -v cygpath >/dev/null 2>&1; then
+      repo_dir="$(cygpath -w "$repo_dir")"
+    else
+      printf 'install.sh: cannot translate WSL path %s (need WSL or Git Bash)\n' "$repo_dir" >&2
+      exit 1
+    fi
+    # Normalize backslashes to forward slashes. Win32 accepts either, but
+    # bash's quoting of single backslashes inside `tr '...'` is brittle,
+    # and mixed paths ("C:\foo/bar") confuse node.exe when the leading
+    # drive letter is interpreted as a relative path component. Use bash
+    # parameter expansion which handles the backslash literally.
+    repo_dir="${repo_dir//\\//}"
+    ;;
+esac
+
 config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
 # ---------------------------------------------------------------------------
@@ -35,6 +61,29 @@ Profile selection:
                      switch to the demonstration "work" profile.
 
   --help, -h         show this help.
+
+Supported shells:
+  The installer runs to completion on the four bash-based shells below
+  without operator workarounds. A Node.js >= 18 binary MUST be on PATH
+  for every shell; the installer resolves "node" first and "node.exe"
+  second, and rejects the run when neither is found.
+
+  - Linux bash (native)         bash ./install.sh --profile personal
+  - macOS bash (native)         bash ./install.sh --profile personal
+  - WSL Ubuntu bash             bash ./install.sh --profile personal
+  - Git Bash on Windows         bash ./install.sh --profile personal
+
+Path translation:
+  When the repository lives under /mnt/<drive>/... (WSL Ubuntu) or
+  /<drive>/... (Git Bash on Windows), the installer translates repo_dir
+  to a Windows path before invoking node.exe. The translation uses
+  wslpath -w when available and cygpath -w as a fallback. Native Linux
+  and macOS paths are passed through unchanged.
+
+Font installer:
+  On Linux and macOS the bash font installer runs automatically. On
+  Windows, scripts/install-nerd-fonts.sh is not invoked; run
+  scripts/install-nerd-fonts.ps1 by hand to install the font.
 
 Profile changes are durable: edit config/model-profiles.json through the
 OpenSpec workflow at openspec/changes/<change-name>/. AGENTS.md has the
@@ -95,12 +144,18 @@ if [ ! -f "$manifest_path" ]; then
   exit 1
 fi
 
-if ! command -v node >/dev/null 2>&1; then
+# Resolve the node binary reliably: try `node` first (Linux/macOS), then
+# `node.exe` (Windows). Git Bash on Windows can resolve `node.exe` to a
+# real path while `command -v node` returns success with empty stdout;
+# the empty string is rejected by the executable check below.
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+[ -z "$NODE_BIN" ] && NODE_BIN="$(command -v node.exe 2>/dev/null || true)"
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
   printf 'install.sh: node is required to render the selected profile; install Node.js >= 18.\n' >&2
   exit 1
 fi
 
-DEFAULT_PROFILE="$(node -e "
+DEFAULT_PROFILE="$("$NODE_BIN" -e "
 const fs=require('fs');
 const m=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
 if(!m.defaultProfile||typeof m.defaultProfile!=='string'){process.exit(2);}
@@ -115,13 +170,13 @@ SELECTED_PROFILE="${PROFILE_OVERRIDE:-$DEFAULT_PROFILE}"
 # Verify the profile exists in the manifest. This is the early gate for task
 # 2.4: an unknown profile is rejected before any installed configuration is
 # touched.
-PROFILE_EXISTS="$(node -e "
+PROFILE_EXISTS="$("$NODE_BIN" -e "
 const fs=require('fs');
 const m=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
 process.stdout.write(m.profiles && m.profiles[process.argv[2]] ? 'yes' : 'no');
 " "$manifest_path" "$SELECTED_PROFILE")"
 if [ "$PROFILE_EXISTS" != "yes" ]; then
-  AVAILABLE="$(node -e "
+  AVAILABLE="$("$NODE_BIN" -e "
 const fs=require('fs');
 const m=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
 process.stdout.write(Object.keys(m.profiles||{}).join(', '));
@@ -142,7 +197,7 @@ printf 'install.sh: profile=%s\n' "$SELECTED_PROFILE"
 # loudly so the operator sees the violation.
 
 if [ -f "$repo_dir/scripts/validate-config.mjs" ]; then
-  if ! node "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE"; then
+  if ! "$NODE_BIN" "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE"; then
     printf 'OpenCode configuration validation failed; refusing to link.\n' >&2
     exit 1
   fi
@@ -161,7 +216,7 @@ renderer="$repo_dir/scripts/render-config.mjs"
 rendered_tmp="$(mktemp -t opencode-rendered-XXXXXX.jsonc)"
 trap 'rm -f "$rendered_tmp"' EXIT
 
-if ! node "$renderer" --profile "$SELECTED_PROFILE" --output "$rendered_tmp"; then
+if ! "$NODE_BIN" "$renderer" --profile "$SELECTED_PROFILE" --output "$rendered_tmp"; then
   printf 'install.sh: failed to render profile %q into %s\n' "$SELECTED_PROFILE" "$rendered_tmp" >&2
   exit 1
 fi
@@ -169,7 +224,7 @@ fi
 # Validate the rendered output structurally and against the catalog when the
 # catalog is present. A render failure or a phantom-id failure must NOT
 # replace a previously working installed root config.
-if ! node "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE" --rendered-config "$rendered_tmp"; then
+if ! "$NODE_BIN" "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE" --rendered-config "$rendered_tmp"; then
   printf 'install.sh: rendered configuration failed validation; refusing to install.\n' >&2
   exit 1
 fi

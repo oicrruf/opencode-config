@@ -1,0 +1,4 @@
+# All text files in this repository MUST be LF in the index and the working
+# tree. The OpenCode installer and its scripts depend on bash parsing the
+# shebang, `set -euo pipefail`, and heredocs without trailing CRs.
+* text=auto eol=lf
