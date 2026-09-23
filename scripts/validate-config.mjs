@@ -492,7 +492,7 @@ function runProfileChecks() {
   if (!existsSync(catalogPath)) {
     console.log(
       `validate-config: skip — models catalog not found at ${catalogPath}; ` +
-        `ollama-cloud/minimax-m3, ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
+        `ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
     );
   } else {
     let catalog = null;
@@ -501,7 +501,7 @@ function runProfileChecks() {
     } catch {
       console.log(
         `validate-config: skip — models catalog at ${catalogPath} is not parseable; ` +
-          `ollama-cloud/minimax-m3, ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
+          `ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
       );
     }
     if (catalog) {

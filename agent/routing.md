@@ -12,7 +12,7 @@ exactly one class, and applies the matching row.
 | Class          | Default model                       | Subagent depth | Specialist count | Browser MCP | Notes |
 |----------------|-------------------------------------|----------------|------------------|-------------|-------|
 | `small`        | `ollama-cloud/gpt-oss:20b`          | 0              | 0                | deny        | inline edits; no specialist dispatch |
-| `medium`       | `ollama-cloud/minimax-m3`           | 1              | 0–1              | deny        | bounded multi-file work, no durable decision |
+| `medium`       | `ollama-cloud/gpt-oss:20b`           | 1              | 0–1              | deny        | bounded multi-file work, no durable decision |
 | `spec-required`| `openai/gpt-5.6-terra` (planning) + `minimax/MiniMax-M3` (implementation) | 1 | 0–2 | only with explicit risk | proposal first, then implement |
 | `audit`        | `openai/gpt-5.6-terra`              | 1              | 0–1              | required    | explicit `@cotizador` or development-quote request only |
 
@@ -26,8 +26,7 @@ authenticated in `auth.json`; `scripts/validate-config.mjs` enforces it.
 | Decision         | `openai/gpt-5.6-terra`         | $2 / $12             | —       | `architect`, `orchestrator`, `refactor`, `adversarial`, `cotizador`, `/opsx-propose` |
 | Planning         | `openai/gpt-5.6-luna`          | $0.2 / $1.2          | —       | `plan` (triage only) |
 | Direct-MiniMax   | `minimax/MiniMax-M3`           | $0.3 / $1.2          | 1M      | root default, `spec-required` implementation |
-| Ollama-MiniMax   | `ollama-cloud/minimax-m3`      | $0.6 / $2.4          | 512k    | `build`, `general`, `frontend`, `backend`, `qa` |
-| Value            | `ollama-cloud/gpt-oss:20b`     | $0.07 / $0.3         | 131k    | `explore`, `p5t-installer`, `small_model` |
+| Value            | `ollama-cloud/gpt-oss:20b`     | $0.07 / $0.3         | 131k    | `build`, `general`, `frontend`, `backend`, `qa`, `explore`, `p5t-installer`, `small_model` |
 
 A command that produces a durable planning artifact runs on the **decision**
 tier even when its invoking agent runs cheaper: the artifact's quality sets
@@ -43,15 +42,15 @@ inherits from the class.
 | Agent                | Default model            | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
 |----------------------|--------------------------|---------|-------------|-----------|--------|----------|
 | `plan`               | `openai/gpt-5.6-luna`    | 100     | deny        | allow     | deny   | allow     |
-| `build`              | `ollama-cloud/minimax-m3`| 60      | deny        | allow     | deny   | allow     |
-| `general`            | `ollama-cloud/minimax-m3`| 40      | deny        | allow     | deny   | allow     |
+| `build`              | `ollama-cloud/gpt-oss:20b`| 60      | deny        | allow     | deny   | allow     |
+| `general`            | `ollama-cloud/gpt-oss:20b`| 40      | deny        | allow     | deny   | allow     |
 | `explore`            | `ollama-cloud/gpt-oss:20b` | 25    | deny        | allow     | deny   | deny      |
 | `architect`          | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `orchestrator`       | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `refactor`           | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | allow  | allow     |
-| `frontend`           | `ollama-cloud/minimax-m3`| 40      | allow       | allow     | deny   | deny      |
-| `backend`            | `ollama-cloud/minimax-m3`| 40      | deny        | allow     | deny   | allow     |
-| `qa`                 | `ollama-cloud/minimax-m3`| 60      | allow       | allow     | deny   | deny      |
+| `frontend`           | `ollama-cloud/gpt-oss:20b`| 40      | allow       | allow     | deny   | deny      |
+| `backend`            | `ollama-cloud/gpt-oss:20b`| 40      | deny        | allow     | deny   | allow     |
+| `qa`                 | `ollama-cloud/gpt-oss:20b`| 60      | allow       | allow     | deny   | deny      |
 | `adversarial`        | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
 | `cotizador`          | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |
 | `p5t-installer`      | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
