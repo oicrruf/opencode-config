@@ -45,7 +45,7 @@ config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
 PROFILE_OVERRIDE=""
 print_help() {
-  cat <<EOF
+  cat <<'EOF'
 Usage: ./install.sh [--profile <name>]
 
 Profile selection:
