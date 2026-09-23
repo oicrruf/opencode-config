@@ -151,6 +151,25 @@ function main() {
     template.agent[name].model = model;
   }
 
+  // Local MCP command paths are now expected to already be absolute in the
+  // template. The previous `{__repo_root__}` placeholder machinery was used
+  // by the now-removed Jev adapter; keeping the renderer strict means a
+  // future agent that ships an MCP server must commit to an absolute path
+  // or fail validation, instead of silently rewriting a relative token.
+  if (template.mcp && typeof template.mcp === 'object') {
+    for (const [, entry] of Object.entries(template.mcp)) {
+      if (!entry || entry.type !== 'local' || !Array.isArray(entry.command)) {
+        continue;
+      }
+      entry.command = entry.command.map((value) => {
+        if (typeof value === 'string' && /\{__repo_root__\}/.test(value)) {
+          return value.replace(/\{__repo_root__\}/g, repoRoot);
+        }
+        return value;
+      });
+    }
+  }
+
   // Commands: the manifest is informational. The renderer does not write
   // command files; commands are symlinked from the source directory and keep
   // their `model:` frontmatter. Coverage of every command with a frontmatter

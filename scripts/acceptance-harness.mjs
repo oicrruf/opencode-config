@@ -176,6 +176,7 @@ const EXPECTED_AGENT_MODELS = {
   adversarial: 'openai/gpt-5.6-terra',
   cotizador: 'openai/gpt-5.6-terra',
   'p5t-installer': 'ollama-cloud/gpt-oss:20b',
+  jev: 'ollama-cloud/gpt-oss:20b',
 };
 
 check('resolved config matches the routing matrix for every agent', () => {
@@ -252,6 +253,21 @@ check('the planning tier still has a member (plan)', () => {
   return 'plan remains on the planning tier';
 });
 
+check('every agent file declares mode: primary or mode: subagent', () => {
+  const dir = join(repoRoot, 'agent');
+  const offenders = [];
+  for (const f of readdirSync(dir).filter((n) => n.endsWith('.md'))) {
+    const fm = readFrontmatter(join(dir, f));
+    if (!fm) continue;
+    const name = f.replace(/\.md$/, '');
+    if (fm.mode !== 'primary' && fm.mode !== 'subagent') {
+      offenders.push(`${name}: mode is ${fm.mode || '(unset)'}, expected primary or subagent`);
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${readdirSync(dir).filter((n) => n.endsWith('.md')).length} agent files declare a mode`;
+});
+
 check('every configured model id is served by an authenticated provider', () => {
   const catalogPath = join(homedir(), '.cache', 'opencode', 'models.json');
   if (!existsSync(catalogPath)) return 'skipped: models catalog absent';
@@ -266,6 +282,49 @@ check('every configured model id is served by an authenticated provider', () => 
   }
   assert(bad.length === 0, `unresolved: ${bad.join(', ')}`);
   return `${ids.length} ids resolve`;
+});
+
+check('no MCP tool family references jev in any agent permission', () => {
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const offenders = [];
+  for (const [agent, body] of Object.entries(cfg.agent ?? {})) {
+    const perms = body?.permission || {};
+    if (perms['jev_*'] === 'allow' || perms.jev === 'allow') {
+      offenders.push(`${agent}: unexpected jev_* or jev allow permission`);
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${Object.keys(cfg.agent ?? {}).length} agents deny jev tools`;
+});
+
+check('rendered config does not declare a Jev MCP server', () => {
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  assert(
+    !(cfg.mcp && cfg.mcp.jev),
+    `rendered config still declares mcp.jev: ${JSON.stringify(cfg.mcp?.jev)}`,
+  );
+  return 'mcp.jev absent from rendered config';
+});
+
+check('renderer no longer substitutes {__repo_root__}', () => {
+  const tpl = readJsonc(join(repoRoot, 'config/opencode.template.jsonc'));
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  for (const [serverName, entry] of Object.entries(cfg.mcp ?? {})) {
+    if (!entry?.command) continue;
+    for (const token of entry.command) {
+      if (typeof token !== 'string') continue;
+      assert(
+        !/\{__repo_root__\}/.test(token),
+        `rendered mcp.${serverName} command still contains {__repo_root__}: ${token}`,
+      );
+    }
+  }
+  const tplTokens = JSON.stringify(tpl.mcp ?? {});
+  assert(
+    !/\{__repo_root__\}/.test(tplTokens),
+    'template still uses {__repo_root__}; the placeholder contract should be retired',
+  );
+  return 'no {__repo_root__} placeholder remains in template or rendered mcp commands';
 });
 
 // ---------------------------------------------------------------------------
@@ -311,6 +370,40 @@ check('no wrapper copies skill content (injects only)', () => {
   }
   assert(offenders.length === 0, `wrappers embedding skill bodies: ${offenders.join(', ')}`);
   return 'all wrappers inject from the canonical path';
+});
+
+check('only build, plan, and adversarial may dispatch the jev subagent', () => {
+  // `opsx-propose` is a command that runs in the default agent (build)
+  // and therefore inherits build's dispatch rights. The harness encodes
+  // the explicit allow-list named in
+  // `openspec/specs/agent-routing/spec.md` and
+  // `openspec/specs/jev-decision-agent/spec.md`.
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const allowed = ['build', 'plan', 'adversarial'];
+  const offenders = [];
+  for (const [agent, body] of Object.entries(cfg.agent ?? {})) {
+    const perms = body?.permission || {};
+    const hasTaskAllow = perms.task === 'allow';
+    const hasExplicitDeny = perms.task === 'deny';
+    if (allowed.includes(agent)) {
+      if (!hasTaskAllow) offenders.push(`${agent}: missing task: allow`);
+    } else if (hasTaskAllow && !hasExplicitDeny) {
+      offenders.push(`${agent}: unexpected task: allow (only ${allowed.join(', ')} may dispatch jev)`);
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${allowed.length} allow / ${Object.keys(cfg.agent ?? {}).length - allowed.length} deny`;
+});
+
+check('opsx-propose command does not use subtask (inherits default agent)', () => {
+  const file = join(repoRoot, 'commands/opsx-propose.md');
+  if (!existsSync(file)) return 'skipped: opsx-propose.md missing';
+  const text = readFileSync(file, 'utf8');
+  assert(
+    !/^subtask:\s*true/m.test(text),
+    'opsx-propose must not declare subtask: true; it inherits the default agent (build)',
+  );
+  return 'opsx-propose runs in the default agent context';
 });
 
 // ---------------------------------------------------------------------------

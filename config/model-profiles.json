@@ -46,7 +46,8 @@
         "orchestrator": "openai/gpt-5.6-terra",
         "refactor": "openai/gpt-5.6-terra",
         "adversarial": "openai/gpt-5.6-terra",
-        "cotizador": "openai/gpt-5.6-terra"
+        "cotizador": "openai/gpt-5.6-terra",
+        "jev": "ollama-cloud/gpt-oss:20b"
       },
       "commands": {
         "opsx-propose": "openai/gpt-5.6-terra",
@@ -76,7 +77,8 @@
         "orchestrator": "openai/gpt-5.6-terra",
         "refactor": "openai/gpt-5.6-terra",
         "adversarial": "openai/gpt-5.6-terra",
-        "cotizador": "openai/gpt-5.6-terra"
+        "cotizador": "openai/gpt-5.6-terra",
+        "jev": "ollama-cloud/gpt-oss:20b"
       },
       "commands": {
         "opsx-propose": "openai/gpt-5.6-terra",

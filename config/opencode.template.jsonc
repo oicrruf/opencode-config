@@ -41,6 +41,7 @@
       "permission": {
         "edit": "deny",
         "bash": { "*": "ask" },
+        "task": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
       }
@@ -54,6 +55,7 @@
       "permission": {
         "edit": "deny",
         "bash": "deny",
+        "task": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow",
         "playwright_*": "allow"
@@ -171,6 +173,19 @@
         "edit": "allow",
         "bash": "allow",
         "external_directory": "allow",
+        "codegraph_*": "allow",
+        "context7_*": "allow"
+      }
+    },
+    "jev": {
+      "steps": 25,
+      "permission": {
+        "edit": "deny",
+        "bash": "ask",
+        "task": "deny",
+        "external_directory": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
         "codegraph_*": "allow",
         "context7_*": "allow"
       }
