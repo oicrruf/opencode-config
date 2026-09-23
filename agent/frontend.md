@@ -1,7 +1,6 @@
 ---
 description: Global frontend specialist — UI, CSS, JS, responsive, accessibility. Use when the task is about markup, styles, components, layout, browser behavior, design polish, or visual regressions. Detects the project's frontend stack and delegates to a project-specific specialist when one exists; otherwise applies sensible defaults.
 mode: subagent
-model: minimax/MiniMax-M3
 steps: 40
 permission:
   edit: allow

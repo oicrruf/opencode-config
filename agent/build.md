@@ -1,7 +1,6 @@
 ---
 description: Build agent. Classifies scope, applies small work directly, and coordinates OpenSpec and specialists for substantial changes.
 mode: primary
-model: minimax/MiniMax-M3
 steps: 60
 permission:
   edit: allow

@@ -1,7 +1,6 @@
 ---
 description: Planning agent - investigates requests, classifies their scope, and uses OpenSpec only when durable specification is justified.
 mode: primary
-model: openai/gpt-5.6-luna
 steps: 100
 ---
 

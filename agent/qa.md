@@ -1,7 +1,6 @@
 ---
 description: Global QA specialist — runs the project's test suite, lint, coverage, and accessibility checks. Use when the user asks "run tests", "verifica", "está todo OK?", "qué dice coverage", "a11y scan". Does not write tests or fix code; reports failures tagged with the responsible role (frontend|backend|unknown). Detects the project's QA tooling and delegates to a project-specific specialist when one exists.
 mode: subagent
-model: minimax/MiniMax-M3
 steps: 60
 permission:
   edit: deny

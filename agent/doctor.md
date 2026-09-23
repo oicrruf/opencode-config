@@ -1,7 +1,6 @@
 ---
 description: Diagnose and repair the OpenCode environment — inspect the OS, package manager, declared MCPs, OpenSpec proposals, and the symlinked configuration under ~/.config/opencode, repair the safe subset, and surface everything that needs explicit operator approval.
 mode: subagent
-model: ollama-cloud/gpt-oss:20b
 steps: 100
 # Read-mostly agent: edit is denied because the safe repairs live in
 # scripts/doctor.mjs. bash is `ask` so the operator still approves any

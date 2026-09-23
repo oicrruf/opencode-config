@@ -2,9 +2,7 @@
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "edit": "ask",
-    "bash": {
-      "*": "ask"
-    },
+    "bash": { "*": "ask" },
     "task": "deny",
     "external_directory": "deny",
     "webfetch": "ask",
@@ -42,22 +40,14 @@
       "steps": 100,
       "permission": {
         "edit": "deny",
-        "bash": {
-          "*": "ask"
-        },
+        "bash": { "*": "ask" },
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "openai/gpt-5.6-luna"
+      }
     },
     "explore": {
       "steps": 25,
-      "permission": {
-        "edit": "deny",
-        "bash": "deny",
-        "codegraph_*": "allow"
-      },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "permission": { "edit": "deny", "bash": "deny", "codegraph_*": "allow" }
     },
     "adversarial": {
       "steps": 100,
@@ -67,8 +57,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow",
         "playwright_*": "allow"
-      },
-      "model": "openai/gpt-5.6-terra"
+      }
     },
     "build": {
       "steps": 60,
@@ -78,8 +67,7 @@
         "task": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "ollama-cloud/minimax-m3"
+      }
     },
     "general": {
       "steps": 40,
@@ -87,8 +75,7 @@
         "edit": "ask",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "ollama-cloud/minimax-m3"
+      }
     },
     "frontend": {
       "steps": 40,
@@ -97,8 +84,7 @@
         "bash": "ask",
         "codegraph_*": "allow",
         "playwright_*": "allow"
-      },
-      "model": "ollama-cloud/minimax-m3"
+      }
     },
     "backend": {
       "steps": 40,
@@ -107,8 +93,7 @@
         "bash": "ask",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "ollama-cloud/minimax-m3"
+      }
     },
     "qa": {
       "steps": 60,
@@ -117,8 +102,7 @@
         "bash": "deny",
         "codegraph_*": "allow",
         "playwright_*": "allow"
-      },
-      "model": "ollama-cloud/minimax-m3"
+      }
     },
     "cotizador": {
       "steps": 100,
@@ -128,8 +112,7 @@
         "webfetch": "allow",
         "codegraph_*": "allow",
         "playwright_*": "allow"
-      },
-      "model": "openai/gpt-5.6-terra"
+      }
     },
     "refactor": {
       "steps": 100,
@@ -145,8 +128,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow",
         "serena_*": "allow"
-      },
-      "model": "openai/gpt-5.6-terra"
+      }
     },
     "architect": {
       "steps": 100,
@@ -160,8 +142,7 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "openai/gpt-5.6-terra"
+      }
     },
     "orchestrator": {
       "steps": 100,
@@ -172,8 +153,7 @@
         "question": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "openai/gpt-5.6-terra"
+      }
     },
     "p5t-installer": {
       "steps": 100,
@@ -183,8 +163,7 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "ollama-cloud/gpt-oss:20b"
+      }
     },
     "doctor": {
       "steps": 100,
@@ -194,18 +173,13 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
-      },
-      "model": "ollama-cloud/gpt-oss:20b"
+      }
     }
   },
   "mcp": {
     "codegraph": {
       "type": "local",
-      "command": [
-        "codegraph",
-        "serve",
-        "--mcp"
-      ],
+      "command": ["codegraph", "serve", "--mcp"],
       "enabled": true,
       "environment": {
         "CODEGRAPH_TELEMETRY": "0"
@@ -221,12 +195,7 @@
     },
     "serena": {
       "type": "local",
-      "command": [
-        "serena",
-        "start-mcp-server",
-        "--transport",
-        "stdio"
-      ],
+      "command": ["serena", "start-mcp-server", "--transport", "stdio"],
       "enabled": true
     },
     "playwright": {
@@ -240,7 +209,5 @@
       ],
       "enabled": true
     }
-  },
-  "model": "minimax/MiniMax-M3",
-  "small_model": "ollama-cloud/gpt-oss:20b"
+  }
 }

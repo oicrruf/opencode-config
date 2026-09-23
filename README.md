@@ -13,11 +13,40 @@ git clone https://github.com/oicrruf/opencode-config.git ~/Projects/opencode-con
 ~/Projects/opencode-config/install.sh
 ```
 
-The installer creates symbolic links under `~/.config/opencode`. It refuses to
-replace existing non-link paths. The Herdr-managed plugin is left untouched.
+The installer creates symbolic links under `~/.config/opencode` for the
+`agent/`, `commands/`, `skills/`, `tui.jsonc`, `quota-tui.tsx`, and
+`herdr-tui-session.js` paths. The root `opencode.jsonc` is rendered from
+`config/opencode.template.jsonc` and the selected profile in
+`config/model-profiles.json`; the installer writes it directly rather than
+symlinking it. The previous root config is backed up to
+`opencode.jsonc.bak.<timestamp>` when the renderer overwrites it. The
+installer refuses to replace existing non-link paths. The Herdr-managed
+plugin is left untouched.
 
 Restart OpenCode after installing or pulling changes, because configuration is
 loaded only at startup.
+
+### Profile selection
+
+The model assignments live in `config/model-profiles.json`. The installer
+reads the manifest at install time, picks the profile named by `--profile`
+(or `defaultProfile`, normally `personal`), renders it, validates it, and
+atomically replaces the installed `~/.config/opencode/opencode.jsonc`. The
+selected profile persists; ordinary `opencode` invocations need no profile
+flag or environment variable.
+
+```bash
+./install.sh                       # default: the manifest's defaultProfile (currently personal)
+./install.sh --profile personal    # explicit selection
+./install.sh --profile work        # demonstration profile (NOT a recommendation; see AGENTS.md)
+./install.sh --help
+```
+
+To add a new profile, follow the OpenSpec workflow (see `AGENTS.md`): open a
+change under `openspec/changes/<name>/`, declare the profile in the
+manifest, validate with `node scripts/validate-config.mjs --profile <name>`,
+then archive. The validator rejects profiles with missing consumers or
+phantom IDs before any installed configuration is touched.
 
 ### Windows (native, PowerShell 5.1+)
 
@@ -145,6 +174,23 @@ git -C ~/Projects/opencode-config pull --ff-only
 
 The links point to the clone, so no reinstall is needed after a successful
 pull. Restart OpenCode to use the update.
+
+### Switching profiles
+
+Re-running the installer with a different `--profile` re-renders the root
+config from the new profile and atomically replaces the installed
+`opencode.jsonc`. The previous root config is backed up to
+`opencode.jsonc.bak.<timestamp>`. The other symlinked resources (agents,
+commands, skills, plugins, TUI) are unchanged.
+
+```bash
+~/Projects/opencode-config/install.sh --profile work
+```
+
+The renderer validates the new profile against the catalog (when the
+catalog is present) before the install commit, so a phantom id in the
+manifest fails the install before any file in `~/.config/opencode/` is
+touched.
 
 ## Code intelligence
 

@@ -1,7 +1,6 @@
 ---
 description: Refactor specialist. Behavior-preserving structural edits inside a git worktree, gated by an OpenSpec change and a green test baseline. Use when the user says "refactor", "refactoriza", "extract", "rename", "move", "split", "consolidate".
 mode: subagent
-model: openai/gpt-5.6-terra
 steps: 100
 # Broadened permission: this agent runs a long refactor in an isolated
 # worktree (`.opencode/worktree/<name>/`). It needs shell, edit, and

@@ -1,7 +1,6 @@
 ---
 description: Global backend specialist — APIs, server-side code, data layer, integrations. Use when the task is about HTTP handlers, business logic, auth, data persistence, background jobs, or third-party API calls. Detects the project's backend stack and delegates to a project-specific specialist when one exists; otherwise applies sensible defaults.
 mode: subagent
-model: minimax/MiniMax-M3
 steps: 40
 permission:
   edit: allow
