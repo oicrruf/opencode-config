@@ -122,6 +122,49 @@ scripts/install-nerd-fonts.sh --offline /path/to/JetBrainsMono.zip
 powershell -ExecutionPolicy Bypass -File scripts\install-nerd-fonts.ps1 -Offline C:\path\to\JetBrainsMono.zip
 ```
 
+## Post-install verification
+
+After linking resources, `install.sh` runs the project's required gates:
+
+- `profile-tests` — `node scripts/test-model-profiles.mjs`
+- `jev-client-tests` — `node --test agent/lib/test/jev-client.test.mjs`
+- `acceptance-harness` — `node scripts/acceptance-harness.mjs`
+- `openspec-validate` — `openspec validate --specs --strict --type spec`
+  (only when the `openspec` CLI is on PATH; otherwise skipped)
+
+A successful install prints a final summary line:
+
+```
+install.sh: OK — 4/4 gates passed (0 skipped)
+```
+
+If a required gate fails, `install.sh` exits non-zero and prints the failing
+gate's name so you can re-run with the matching opt-out or fix the failure and
+re-run `./install.sh`:
+
+```
+install.sh: FAIL — gate acceptance-harness failed; rerun with OPENCODE_SKIP_ACCEPTANCE=1 to bypass, or fix the underlying failure and re-run ./install.sh
+```
+
+### Per-gate opt-outs
+
+Set any of these to `1` before running `install.sh` to bypass a single gate.
+Skipped gates do not cause a non-zero exit.
+
+| Env var                          | Effect                                                   |
+|----------------------------------|----------------------------------------------------------|
+| `OPENCODE_SKIP_PROFILE_TESTS`    | Skip `node scripts/test-model-profiles.mjs`               |
+| `OPENCODE_SKIP_JEV_CLIENT_TESTS` | Skip `node --test agent/lib/test/jev-client.test.mjs`     |
+| `OPENCODE_SKIP_ACCEPTANCE`       | Skip `node scripts/acceptance-harness.mjs`                |
+| `OPENCODE_SKIP_OPENSPEC_VALIDATE`| Skip `openspec validate --specs --strict --type spec`     |
+
+### CI consumption
+
+Grep the last line of stdout for `^install\.sh: OK — \d+/\d+ gates passed`
+to confirm a healthy install. When the install fails, the line is replaced
+with `install.sh: FAIL — gate <name> failed`.
+```
+
 ## Diagnose and repair (`/doctor`)
 
 The global `doctor` subagent inspects the host, the configuration

@@ -39,6 +39,18 @@ Profile selection:
 Profile changes are durable: edit config/model-profiles.json through the
 OpenSpec workflow at openspec/changes/<change-name>/. AGENTS.md has the
 full process.
+
+Post-install verification:
+  After linking resources, install.sh runs the project's required gates
+  (profile tests, Jev client self-tests, static acceptance harness,
+  and openspec validate --specs --strict --type spec). On success the
+  final line is `install.sh: OK — <p>/<r> gates passed (<s> skipped)`.
+
+  Each gate can be opted out via:
+    OPENCODE_SKIP_PROFILE_TESTS=1
+    OPENCODE_SKIP_JEV_CLIENT_TESTS=1
+    OPENCODE_SKIP_ACCEPTANCE=1
+    OPENCODE_SKIP_OPENSPEC_VALIDATE=1
 EOF
 }
 
@@ -227,6 +239,80 @@ if [ -L "$config_dir/plugins/autonomy.js" ]; then
 fi
 
 printf 'OpenCode configuration linked from %s\n' "$repo_dir"
+
+# ---------------------------------------------------------------------------
+# Post-install verification: when this block exits, every required gate has
+# passed against the just-installed configuration. The block runs the
+# project's static and self-test gates; each can be opted out via
+# OPENCODE_SKIP_<NAME>=1. The final summary line is the contract that
+# operators (and CI) grep for: `install.sh: OK — <p>/<r> gates passed`.
+# ---------------------------------------------------------------------------
+
+gate_pass=0
+gate_required=0
+gate_skipped=0
+gate_first_failure=""
+
+run_gate() {
+  local label="$1"
+  local cmd="$2"
+  gate_required=$((gate_required + 1))
+  printf 'install.sh: gate %s ... ' "$label"
+  if [ "${3:-0}" = "1" ]; then
+    printf 'skipped\n'
+    gate_skipped=$((gate_skipped + 1))
+    return 0
+  fi
+  if eval "$cmd" >/dev/null 2>&1; then
+    printf 'ok\n'
+    gate_pass=$((gate_pass + 1))
+    return 0
+  fi
+  printf 'FAIL\n'
+  if [ -z "$gate_first_failure" ]; then
+    gate_first_failure="$label"
+  fi
+  return 1
+}
+
+gate_status=0
+
+if [ "${OPENCODE_SKIP_PROFILE_TESTS:-0}" = "1" ]; then
+  run_gate "profile-tests" "true" 1 || gate_status=$?
+else
+  run_gate "profile-tests" "node '$repo_dir/scripts/test-model-profiles.mjs'" || gate_status=$?
+fi
+
+if [ "${OPENCODE_SKIP_JEV_CLIENT_TESTS:-0}" = "1" ]; then
+  run_gate "jev-client-tests" "true" 1 || gate_status=$?
+else
+  run_gate "jev-client-tests" "node --test '$repo_dir/agent/lib/test/jev-client.test.mjs'" || gate_status=$?
+fi
+
+if [ "${OPENCODE_SKIP_ACCEPTANCE:-0}" = "1" ]; then
+  run_gate "acceptance-harness" "true" 1 || gate_status=$?
+else
+  run_gate "acceptance-harness" "node '$repo_dir/scripts/acceptance-harness.mjs'" || gate_status=$?
+fi
+
+if [ "${OPENCODE_SKIP_OPENSPEC_VALIDATE:-0}" = "1" ]; then
+  run_gate "openspec-validate" "true" 1 || gate_status=$?
+elif command -v openspec >/dev/null 2>&1; then
+  run_gate "openspec-validate" "openspec validate --specs --strict --type spec" || gate_status=$?
+else
+  # openspec is missing: count it as required but skipped to avoid
+  # blocking the install when the operator simply hasn't installed the CLI.
+  run_gate "openspec-validate" "true" 1 || gate_status=$?
+fi
+
+if [ "$gate_status" -eq 0 ]; then
+  printf 'install.sh: OK — %d/%d gates passed (%d skipped)\n' \
+    "$gate_pass" "$gate_required" "$gate_skipped"
+else
+  printf 'install.sh: FAIL — gate %s failed; rerun with the matching OPENCODE_SKIP_* variable to bypass, or fix the underlying failure and re-run ./install.sh\n' \
+    "$gate_first_failure" >&2
+  exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Final non-fatal reminder for missing prerequisites. The configuration links
