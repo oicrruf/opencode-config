@@ -1,4 +1,11 @@
-## MODIFIED Requirements
+## Purpose
+
+Define a single routing contract that maps work classification to model,
+delegation depth, and allowed tool surface for every global agent, so
+that session cost and capability are predictable from the classification
+alone.
+
+## Requirements
 
 ### Requirement: Work classification drives model and delegation
 
@@ -250,3 +257,105 @@ the selected profile before generating or replacing installed configuration.
 - **WHEN** `~/.cache/opencode/models.json` does not exist
 - **THEN** the script SHALL print a skip notice for the catalog check and SHALL
   NOT fail on it
+
+### Requirement: Jev is a value-tier decision specialist
+
+The system SHALL configure `jev` as a non-delegating, read-only subagent on
+the value tier. Primary agents MAY dispatch it only for bounded structured
+consultation whose outcome is an effort, risk, priority, classification,
+proposal-review, or architecture-option decision. The dispatch SHALL include
+the alternatives when a selection is required and SHALL treat Jev's output as
+advisory evidence, not authority to bypass scope gates or OpenSpec workflow.
+
+#### Scenario: Bounded option selection uses Jev
+
+- **WHEN** a primary agent needs a recommendation among documented technical
+  options and the decision does not itself require a durable plan
+- **THEN** it MAY dispatch `jev` with a bounded brief and use the returned
+  recommendation and confidence in its own decision
+
+#### Scenario: Jev cannot recursively delegate
+
+- **WHEN** the `jev` subagent attempts to dispatch another specialist
+- **THEN** the system SHALL refuse the nested dispatch under the configured
+  subagent-depth limit
+
+### Requirement: Jev dispatcher list is explicit and narrow
+
+The system SHALL restrict `jev` dispatch to exactly the `build`,
+`plan`, and `adversarial` agents, and SHALL additionally allow the
+global `opsx-propose` OpenSpec command to dispatch `jev` during
+proposal planning. Every other agent and every other command SHALL
+NOT dispatch `jev`. The acceptance harness SHALL fail if the
+dispatcher list drifts from this rule.
+
+#### Scenario: build dispatches jev
+
+- **WHEN** the `build` agent calls the `task` tool with `agent: "jev"`
+- **THEN** the dispatch is allowed by the routing matrix and the
+  harness agrees
+
+#### Scenario: general agent does NOT dispatch jev
+
+- **WHEN** the `general` agent calls the `task` tool with `agent: "jev"`
+- **THEN** the routing matrix denies the dispatch under the strict
+  scope gate
+
+#### Scenario: opsx-propose may use jev
+
+- **WHEN** the global `opsx-propose` command runs and needs a
+  calibrated triage during proposal planning
+- **THEN** the command MAY dispatch `jev` with a bounded brief, and
+  the proposal that follows MAY cite the Jev recommendation as
+  supporting evidence
+
+#### Scenario: opsx-apply does NOT dispatch jev
+
+- **WHEN** the global `opsx-apply` command runs
+- **THEN** it SHALL NOT dispatch `jev` because implementation is not
+  a triage activity; Jev's role is advisory
+
+### Requirement: Agents opt in to the value tier when no implementation work is required
+
+The system SHALL assign `ollama-cloud/gpt-oss:20b` to `explore`,
+`p5t-installer`, and `doctor` regardless of the work classification
+because none of those roles perform implementation. The value tier is
+the cheapest tier and the routing matrix SHALL treat these agents as
+default-value consumers.
+
+#### Scenario: explore runs on the value tier
+
+- **WHEN** the global `explore` agent is dispatched
+- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` (or
+  the explicitly user-selected override) and SHALL NOT be
+  `openai/gpt-5.6-terra`
+
+#### Scenario: doctor runs on the value tier
+
+- **WHEN** the global `doctor` agent is dispatched
+- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
+  SHALL NOT be `openai/gpt-5.6-terra`
+
+#### Scenario: p5t-installer runs on the value tier
+
+- **WHEN** the global `p5t-installer` agent is dispatched
+- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
+  SHALL NOT be `openai/gpt-5.6-terra`
+
+### Requirement: /opsx-propose runs on the decision tier regardless of the invoking agent
+
+The `/opsx-propose` global command SHALL declare `model:
+openai/gpt-5.6-terra` in its frontmatter so the proposal is generated
+on the decision tier even when the agent that invoked it runs on a
+cheaper tier (typically `plan` on `gpt-5.6-luna`). The proposal
+quality sets the ceiling for the implementation that follows, so
+running it on a cheaper tier would let a weaker model anchor the
+decision the implementation is held to.
+
+#### Scenario: /opsx-propose runs on Terra from a planning-tier session
+
+- **WHEN** the operator invokes `/opsx-propose <name>` from a session
+  whose agent is `plan` (the planning tier)
+- **THEN** the command SHALL run on `openai/gpt-5.6-terra` and the
+  proposal SHALL be generated on Terra, not on the invoking agent's
+  cheaper model

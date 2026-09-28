@@ -13,18 +13,19 @@ that exposure verifiable.
 
 The system SHALL declare MCP availability per agent using the `permission`
 field. The matrix below is the only allowed default. Per-project overrides
-MAY add an MCP for one agent but SHALL NOT remove the global minimum for
-any agent listed below.
+MAY add an MCP for one agent but SHALL NOT remove the global minimum for any
+agent listed below.
 
-| Agent                | codegraph | context7 | serena | playwright | jev |
-|----------------------|-----------|----------|--------|------------|-----|
-| `build`, `plan`      | allow     | allow    | deny   | deny       | allow |
-| `general`, `architect`, `refactor`, `orchestrator` | allow | allow | deny | deny | deny |
-| `explore`            | allow     | deny     | deny   | deny       | deny |
-| `frontend`, `qa`     | allow     | deny     | deny   | allow      | deny |
-| `backend`            | allow     | allow    | deny   | deny       | deny |
-| `adversarial` (full) | allow     | allow    | deny   | allow      | allow |
-| `cotizador`          | allow     | deny     | deny   | allow      | deny |
+| Agent                | codegraph | context7 | serena | playwright |
+|----------------------|-----------|----------|--------|------------|
+| `build`, `plan`      | allow     | allow    | deny   | deny |
+| `general`, `architect`, `refactor`, `orchestrator` | allow | allow | deny | deny |
+| `explore`            | allow     | deny     | deny | deny |
+| `frontend`, `qa`     | allow     | deny     | deny | allow |
+| `backend`            | allow     | allow | deny | deny |
+| `adversarial` (full) | allow     | allow | deny | allow |
+| `cotizador`          | allow     | deny | deny | allow |
+| `jev`                | deny | deny | deny | deny |
 
 #### Scenario: serena is denied to non-refactor agents
 
@@ -41,9 +42,9 @@ any agent listed below.
 
 #### Scenario: Jev is available only to decision-capable agents
 
-- **WHEN** `build`, `plan`, or `adversarial` is active
-- **THEN** `mcp__jev__jev_evaluate` SHALL be advertised; every other agent
-  in the matrix SHALL NOT see any `mcp__jev__*` tool
+- **WHEN** any configured agent is active
+- **THEN** the system SHALL NOT advertise any `mcp__jev__*` tool because Jev
+  is consulted as a bounded subagent rather than an MCP server
 
 ### Requirement: Global permission baseline is deny by default
 
@@ -93,68 +94,53 @@ that needs Playwright, the Playwright MCP SHALL NOT be started.
 - **THEN** the Playwright MCP process SHALL NOT appear in the process list
   and the `playwright_*` tools SHALL NOT be advertised to the agent
 
-### Requirement: Typed decision endpoints use a local MCP adapter
+### Requirement: Successful install implies every required gate passed
 
-The system SHALL expose a typed decision endpoint that does not implement
-OpenAI chat completions through a local MCP tool rather than through
-`provider.<name>.models` or OpenRouter's hosted discovery MCP. The adapter
-SHALL preserve the endpoint's typed request and response contracts.
+The `install.sh` script SHALL run, immediately after the symlink
+phase, a post-install verification block that exercises the project's
+required gates. When `./install.sh` returns zero, every required gate
+SHALL have passed against the just-installed configuration. When any
+required gate fails, `install.sh` SHALL return non-zero and SHALL
+print the failing gate's name and a remediation hint.
 
-For Jev, the only exposed tool SHALL be `jev_evaluate`; it SHALL forward a
-`state` and named typed `questions` to OpenRouter SystemOne and return the
-structured `{model, answers, usage}` result. OpenRouter's hosted MCP MAY
-be configured separately for catalog or billing discovery, but it SHALL
-NOT be treated as a substitute for Jev evaluation because its tool list
-does not include generic SystemOne requests.
+#### Scenario: Clean install
 
-#### Scenario: Jev is a tool rather than a chat model
+- **WHEN** the operator runs `./install.sh` from a healthy checkout
+  with no opt-out env vars set
+- **THEN** the script exits zero, prints a "X/Y gates passed"
+  summary, and the installed `~/.config/opencode` is unchanged by any
+  subsequent gate failure
 
-- **WHEN** an allowed agent needs a calibrated decision such as classifying
-  a proposed change as `fix`, `feat`, or `chore`
-- **THEN** the agent SHALL call `mcp__jev__jev_evaluate` with a `choice`
-  question and SHALL NOT select `typesafe/jev-1.13` as its own chat model
+#### Scenario: A required gate fails
 
-#### Scenario: Supported primitives retain their response shapes
+- **WHEN** the static `acceptance-harness.mjs` reports any failure
+- **THEN** `install.sh` SHALL exit non-zero, name the failing gate,
+  and leave the previously installed config (if any) intact
 
-- **WHEN** the tool receives a valid `noul`, `choice`, or `score` question
-- **THEN** it SHALL return the upstream answer unchanged, including `noul`,
-  or `choice`/`score` probabilities and confidence where supplied
+### Requirement: Each gate is independently opt-out
 
-### Requirement: Jev MCP startup, authentication, and failure paths are bounded
+The post-install block SHALL honor `OPENCODE_SKIP_ACCEPTANCE`,
+`OPENCODE_SKIP_PROFILE_TESTS`, `OPENCODE_SKIP_JEV_CLIENT_TESTS`, and
+`OPENCODE_SKIP_OPENSPEC_VALIDATE` so the operator can run a partial
+install. A skipped gate SHALL be printed in the summary, counted as
+"skipped" instead of "passed", and SHALL NOT cause a non-zero exit.
 
-The rendered `mcp.jev` command SHALL resolve the local server through an
-absolute path derived from the installed repository root, so launching
-OpenCode from an unrelated project directory SHALL still start the server.
-The server SHALL resolve its API key from `OPENROUTER_API_KEY` first and
-then from the existing per-user OpenCode `openrouter` auth entry when the
-environment value is absent. It MUST NOT write the key to stdout, stderr,
-the rendered config, or any tracked file.
+#### Scenario: Skip the runtime acceptance harness
 
-The server SHALL answer MCP initialization and `tools/list` requests
-without contacting OpenRouter. For an evaluation request, it SHALL impose
-an upstream deadline shorter than OpenCode's 30-second tool timeout and
-return a structured tool error (including a remediation hint for missing
-credentials) instead of leaving the caller to time out.
+- **WHEN** `OPENCODE_SKIP_ACCEPTANCE=1 ./install.sh` runs on a
+  checkout where the static harness would fail
+- **THEN** the script exits zero, prints `acceptance-harness:
+  skipped`, and does not run that gate
 
-#### Scenario: OpenCode starts from another project directory
+### Requirement: Summary line is the last line on success
 
-- **WHEN** OpenCode is launched with a current working directory outside
-  this configuration repository
-- **THEN** the local Jev server SHALL start and respond to `tools/list`
-  without the prior 30-second startup timeout
+`install.sh` SHALL print, on success, a single trailing line of the
+form `install.sh: OK — <passed>/<required> gates passed (<skipped>
+skipped)` so the operator can grep for it in CI logs.
 
-#### Scenario: No credential is available
+#### Scenario: CI consumes the summary
 
-- **WHEN** neither `OPENROUTER_API_KEY` nor a valid OpenCode `openrouter`
-  auth entry is available
-- **THEN** `jev_evaluate` SHALL return a structured tool error that directs
-  the operator to `/connect` for OpenRouter, without issuing an upstream
-  request or terminating the MCP process
-
-#### Scenario: OpenRouter is slow or unreachable
-
-- **WHEN** the upstream SystemOne request cannot complete before the
-  wrapper's internal deadline
-- **THEN** `jev_evaluate` SHALL return a structured tool error before
-  OpenCode's 30-second operation timeout, and the MCP process SHALL remain
-  usable for the next request
+- **WHEN** CI runs `./install.sh` and captures stdout
+- **THEN** the last line matches the documented `OK — ...` format
+  when the install is healthy, and is absent (or replaced with an
+  error line) when the install fails
