@@ -25,7 +25,7 @@ agent listed below.
 | `backend`            | allow     | allow | deny | deny |
 | `adversarial` (full) | allow     | allow | deny | allow |
 | `cotizador`          | allow     | deny | deny | allow |
-| `jev`                | deny | deny | deny | deny |
+| `triage`                | deny | deny | deny | deny |
 
 #### Scenario: serena is denied to non-refactor agents
 
@@ -40,10 +40,10 @@ agent listed below.
   runs in `targeted` mode without visual checks the system SHALL still allow
   the tools so the agent can self-decide
 
-#### Scenario: Jev is available only to decision-capable agents
+#### Scenario: Triage is available only to decision-capable agents
 
 - **WHEN** any configured agent is active
-- **THEN** the system SHALL NOT advertise any `mcp__jev__*` tool because Jev
+- **THEN** the system SHALL NOT advertise any `mcp__jev__*` tool because Triage
   is consulted as a bounded subagent rather than an MCP server
 
 ### Requirement: Global permission baseline is deny by default

@@ -313,21 +313,21 @@ hides the corresponding tool families from agents that should not see
 them. Use `node scripts/validate-config.mjs` to verify the policy
 before committing.
 
-## Jev decision agent
+## Triage decision agent
 
 Jev 1.13 is a "decision model": it accepts a typed `{state, questions}`
 payload at OpenRouter's `POST https://openrouter.ai/api/v1/systemone`
 endpoint and returns structured answers with probabilities rather than
-free-form text. SystemOne is not an OpenAI chat-completions API, so Jev
+free-form text. SystemOne is not an OpenAI chat-completions API, so the
 cannot be wired up as an OpenCode chat model. Earlier attempts exposed
 it as a local MCP server, but OpenCode repeatedly timed out the
 server's stdio lifecycle even when direct REST calls succeeded; the
-Jev integration now ships as a read-only `jev` subagent instead, with
+Triage integration now ships as a read-only `triage` subagent instead, with
 no MCP entry.
 
 ### Allowed agents
 
-Only `build`, `plan`, and `adversarial` dispatch the `jev` subagent.
+Only `build`, `plan`, and `adversarial` dispatch the `triage` subagent.
 Every other agent in the matrix denies delegation and editing. The
 agent runs on the value tier (`ollama-cloud/gpt-oss:20b`) and refuses
 to nest additional specialists. See the `mcp-profiles` and
@@ -335,16 +335,16 @@ to nest additional specialists. See the `mcp-profiles` and
 
 ### Consultation contract
 
-Dispatchers hand Jev a bounded decision brief. Jev normalizes it into
+Dispatchers hand Triage a bounded decision brief. Triage normalizes it into
 the SystemOne envelope and reports one recommendation, confidence, a
 short rationale, and any decision-critical missing information. The
 default is to select the best available option whenever the supplied
 evidence supports one; when the evidence is missing or contradictory,
-Jev names the gap and asks for more rather than guessing.
+Triage names the gap and asks for more rather than guessing.
 
 Supported decision classes:
 
-| Class                              | Jev primitive |
+| Class                              | Triage primitive |
 |------------------------------------|---------------|
 | Effort estimation, priority, risk  | `score`       |
 | Change classification (fix/feat…)  | `choice`      |
@@ -359,17 +359,17 @@ SystemOne contract; see
 
 1. Authenticate with OpenRouter once via `/connect` inside the opencode
    TUI. The key is stored in `~/.local/share/opencode/auth.json`.
-2. Run `./install.sh`. The new `agent.jev` block is rendered into the
+2. Run `./install.sh`. The new `agent.triage` block is rendered into the
    installed config.
 3. Restart OpenCode so the new agent is registered. There is no MCP
-   entry; OpenCode's MCP status list does not include Jev.
+   entry; OpenCode's MCP status list does not include Triage.
 
 ### Failure behavior
 
 The direct client fails closed:
 
 - **Missing credentials** — neither `OPENROUTER_API_KEY` nor the
-  per-user OpenCode `openrouter.key` entry is available. Jev reports
+  per-user OpenCode `openrouter.key` entry is available. Triage reports
   the missing key and asks the operator to run `/connect`.
 - **Upstream non-2xx** — typically HTTP 401 (re-authenticate via
   `/connect`) or HTTP 429/529 (back off and retry).
@@ -379,7 +379,7 @@ The direct client fails closed:
 
 ### Direct REST call
 
-If you want to query Jev outside OpenCode, use OpenRouter directly:
+If you want to query Triage outside OpenCode, use OpenRouter directly:
 
 ```bash
 curl -sS -X POST https://openrouter.ai/api/v1/systemone \

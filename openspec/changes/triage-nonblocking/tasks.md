@@ -1,0 +1,3 @@
+- [x] Update `agent/triage.md` with the non-blocking contract.
+- [x] Add or update the triage specification.
+- [x] Run validation and acceptance checks.

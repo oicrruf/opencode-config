@@ -1,4 +1,4 @@
-// Local direct SystemOne client used by the read-only `jev` subagent.
+// Local direct SystemOne client used by the read-only `triage` subagent.
 //
 // This client exists because the previous Jev MCP server repeatedly
 // timed out OpenCode's stdio lifecycle even when the underlying REST
@@ -14,12 +14,13 @@
 //
 // The client enforces a strict decision envelope so the agent cannot be
 // turned into a free-form chat client. Inputs and outputs are validated
-// against the primitives defined in `openspec/specs/jev-decision-agent/spec.md`.
+// against the primitives defined in `openspec/specs/triage-decision-agent/spec.md`.
 
 import process from "node:process";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdirSync, openSync, fsyncSync, closeSync, writeSync } from "node:fs";
 import { homedir as osHomedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 
 function currentHomedir() {
   if (typeof homedirOverride === "function") return homedirOverride();
@@ -145,8 +146,17 @@ function validateState(state) {
 
 // --- Structured result shape -----------------------------------------
 
+let lastBriefDigest = null;
+function recordBriefDigest(brief) {
+  try {
+    lastBriefDigest = sha256(JSON.stringify({ state: brief.state, questions: brief.questions }));
+  } catch {
+    lastBriefDigest = null;
+  }
+}
+
 function unavailable(reason, hint) {
-  return {
+  const result = {
     status: "unavailable",
     recommendation: null,
     confidence: null,
@@ -155,6 +165,17 @@ function unavailable(reason, hint) {
     missing: [],
     details: { reason, hint, upstream: currentUpstreamUrl(), model: UPSTREAM_MODEL, deadlineMs: UPSTREAM_DEADLINE_MS },
   };
+  appendAuditRow({
+    timestamp: new Date().toISOString(),
+    briefDigest: lastBriefDigest,
+    status: "unavailable",
+    reason,
+    recommendation: null,
+    confidence: null,
+    evidenceDigest: null,
+  });
+  lastBriefDigest = null;
+  return result;
 }
 
 function successful(payload) {
@@ -168,16 +189,64 @@ function successful(payload) {
     details: {
       upstream: currentUpstreamUrl(),
       model: UPSTREAM_MODEL,
+      evidence: payload.evidence ?? null,
       raw: payload.raw ?? null,
     },
   };
 }
 
+// --- Audit log -------------------------------------------------------
+
+const DEFAULT_AUDIT_PATH = resolve(
+  process.cwd(),
+  ".opencode/state/triage/consultations.jsonl",
+);
+
+let auditPathOverride = null;
+export function _setAuditPathOverrideForTest(value) {
+  auditPathOverride = value;
+}
+function currentAuditPath() {
+  return auditPathOverride ?? DEFAULT_AUDIT_PATH;
+}
+
+let bypassFabricationCheck = false;
+export function _setBypassFabricationCheckForTest(value) {
+  bypassFabricationCheck = !!value;
+}
+
+function sha256(s) {
+  return createHash("sha256").update(String(s)).digest("hex");
+}
+
+function appendAuditRow(row) {
+  const target = currentAuditPath();
+  try {
+    mkdirSync(dirname(target), { recursive: true });
+  } catch {
+    // Best-effort: directory creation failures do not block the call.
+  }
+  let fd;
+  try {
+    fd = openSync(target, "a");
+    const line = JSON.stringify(row) + "\n";
+    writeSync(fd, line);
+    fsyncSync(fd);
+  } catch {
+    // Audit failures are never fatal to the consultation.
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
 function summarizeAnswers(answers) {
   // SystemOne returns `{type, noul|choice|score, probabilities?, confidence?, legend?}`.
-  // Jev (the host agent) asks for a single recommendation; we surface the top
-  // answer as the recommendation, the confidence as-is, and the rest as
-  // supporting context inside `details.raw`.
+  // The surfaced recommendation MUST be a substring of the upstream JSON
+  // payload so the evidence-first contract can verify it. We pick the
+  // first answer and emit the substring `"<id>":<JSON(ans)>` that
+  // appears verbatim inside the upstream `answers` map.
   if (!answers || typeof answers !== "object") {
     return { recommendation: null, confidence: null, raw: null };
   }
@@ -189,13 +258,19 @@ function summarizeAnswers(answers) {
     if (!ans || typeof ans !== "object") continue;
     const t = ans.type;
     if (t === "noul") {
-      if (recommendation === null) recommendation = `${id}=noul(${ans.noul})`;
+      if (recommendation === null) {
+        recommendation = `"${id}":${JSON.stringify(ans)}`;
+      }
       if (confidence === null) confidence = ans.noul;
     } else if (t === "choice") {
-      if (recommendation === null) recommendation = `${id}=${ans.choice}`;
+      if (recommendation === null) {
+        recommendation = `"${id}":${JSON.stringify(ans)}`;
+      }
       if (confidence === null) confidence = ans.confidence ?? null;
     } else if (t === "score") {
-      if (recommendation === null) recommendation = `${id}=${ans.score}`;
+      if (recommendation === null) {
+        recommendation = `"${id}":${JSON.stringify(ans)}`;
+      }
       if (confidence === null) confidence = ans.confidence ?? null;
     }
   }
@@ -212,12 +287,19 @@ function summarizeAnswers(answers) {
  *   rationale: any, uncertainty: string[], missing: string[], details: object}>}
  */
 export async function consult(brief) {
+  lastBriefDigest = null;
   if (!brief || typeof brief !== "object") {
     return unavailable(
       "invalid_brief",
       "Brief must be an object with state and questions.",
     );
   }
+  recordBriefDigest(brief);
+  // Test-only override: a fabricated recommendation can be injected to
+  // verify the evidence-first contract. Production callers never set
+  // this field; if it is set, the call MUST NOT return status=ok when
+  // the recommendation is not a substring of the upstream payload.
+  const forcedRecommendation = typeof brief.recommendation === "string" ? brief.recommendation : null;
   let ids;
   try {
     validateState(brief.state);
@@ -233,7 +315,7 @@ export async function consult(brief) {
   if (!key) {
     return unavailable(
       "missing_credentials",
-      "Authenticate with OpenRouter via /connect; OPENROUTER_API_KEY is empty and ~/.local/share/opencode/auth.json has no openrouter.key.",
+      "OpenRouter API key is optional for this configuration. Triage is being skipped because OPENROUTER_API_KEY is empty and ~/.local/share/opencode/auth.json has no openrouter.key; continue without Triage. Use /connect only if you want to enable Triage.",
     );
   }
 
@@ -242,6 +324,7 @@ export async function consult(brief) {
     state: brief.state,
     questions: brief.questions,
   };
+  lastBriefDigest = sha256(JSON.stringify(body));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), UPSTREAM_DEADLINE_MS);
 
@@ -291,14 +374,82 @@ export async function consult(brief) {
     );
   }
   const summary = summarizeAnswers(parsed.answers);
-  return successful({
-    recommendation: summary.recommendation,
+  const surfacedRecommendation = forcedRecommendation ?? summary.recommendation;
+  // Upstream-only evidence: the canonical source of truth. The
+  // fabrication check runs against this string alone. We strip
+  // whitespace because JSON.stringify uses a space after every
+  // colon/comma while our surfaced recommendation does not.
+  const upstreamEvidenceRaw = JSON.stringify({
+    model: parsed.model ?? UPSTREAM_MODEL,
+    answers: parsed.answers,
+    rationale: parsed.rationale ?? null,
+    usage: parsed.usage ?? null,
+    authSource: source,
+  });
+  const upstreamEvidence = upstreamEvidenceRaw.replace(/\s+/g, "");
+  // Compose the surfaced recommendation from the upstream answer so it
+  // is, by construction, a substring of the upstream evidence. This
+  // makes the fabrication guard a meaningful check: any value that
+  // does not match the upstream structure cannot return ok.
+  let displayString = surfacedRecommendation;
+  if (summary.recommendation && surfacedRecommendation === summary.recommendation) {
+    // The summary already produced a string of the shape
+    // `<id>=<primitive>(<value>)` from `answers[id]`. Verify it
+    // appears in the upstream evidence; if not, refuse.
+    displayString = summary.recommendation;
+  }
+  const evidence = JSON.stringify({
+    upstream: upstreamEvidenceRaw,
+    surfacedRecommendation: displayString,
+  });
+  const result = successful({
+    recommendation: surfacedRecommendation,
     confidence: summary.confidence,
     rationale: parsed.rationale ?? null,
     uncertainty: [],
     missing: [],
-    raw: { model: parsed.model ?? UPSTREAM_MODEL, answers: summary.raw, usage: parsed.usage ?? null, authSource: source },
+    evidence,
+    raw: {
+      model: parsed.model ?? UPSTREAM_MODEL,
+      answers: summary.raw,
+      usage: parsed.usage ?? null,
+      authSource: source,
+    },
   });
+  // Evidence-first contract: refuse `status: "ok"` if the surfaced
+  // recommendation is not a substring of the literal upstream payload.
+  // The upstream payload is the canonical source of truth; the surfaced
+  // recommendation is the host's claim, which MUST be backed by it.
+  if (!bypassFabricationCheck) {
+    const rec = result.recommendation;
+    if (rec !== null && rec !== undefined && !upstreamEvidence.includes(String(rec))) {
+      appendAuditRow({
+        timestamp: new Date().toISOString(),
+        briefDigest: sha256(JSON.stringify(body)),
+        status: "unavailable",
+        reason: "fabricated_recommendation",
+        recommendation: null,
+        confidence: null,
+        evidenceDigest: sha256(evidence),
+      });
+      lastBriefDigest = null;
+      return unavailable(
+        "fabricated_recommendation",
+        "Upstream reply did not contain the surfaced recommendation; refusing to return ok.",
+      );
+    }
+  }
+  appendAuditRow({
+    timestamp: new Date().toISOString(),
+    briefDigest: sha256(JSON.stringify(body)),
+    status: "ok",
+    reason: null,
+    recommendation: result.recommendation,
+    confidence: result.confidence,
+    evidenceDigest: sha256(evidence),
+  });
+  lastBriefDigest = null;
+  return result;
 }
 
 // --- Self-check entry point -------------------------------------------

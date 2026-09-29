@@ -258,62 +258,63 @@ the selected profile before generating or replacing installed configuration.
 - **THEN** the script SHALL print a skip notice for the catalog check and SHALL
   NOT fail on it
 
-### Requirement: Jev is a value-tier decision specialist
+### Requirement: Triage is a value-tier decision specialist
 
-The system SHALL configure `jev` as a non-delegating, read-only subagent on
+The system SHALL configure `triage` as a non-delegating, read-only subagent on
 the value tier. Primary agents MAY dispatch it only for bounded structured
 consultation whose outcome is an effort, risk, priority, classification,
 proposal-review, or architecture-option decision. The dispatch SHALL include
-the alternatives when a selection is required and SHALL treat Jev's output as
+the alternatives when a selection is required and SHALL treat Triage's output as
 advisory evidence, not authority to bypass scope gates or OpenSpec workflow.
 
-#### Scenario: Bounded option selection uses Jev
+#### Scenario: Bounded option selection uses Triage
 
 - **WHEN** a primary agent needs a recommendation among documented technical
   options and the decision does not itself require a durable plan
-- **THEN** it MAY dispatch `jev` with a bounded brief and use the returned
+- **THEN** it MAY dispatch `triage` with a bounded brief and use the returned
   recommendation and confidence in its own decision
 
-#### Scenario: Jev cannot recursively delegate
+#### Scenario: Triage cannot recursively delegate
 
-- **WHEN** the `jev` subagent attempts to dispatch another specialist
+- **WHEN** the `triage` subagent attempts to dispatch another specialist
 - **THEN** the system SHALL refuse the nested dispatch under the configured
   subagent-depth limit
 
-### Requirement: Jev dispatcher list is explicit and narrow
+### Requirement: Triage dispatcher list is explicit and narrow
 
-The system SHALL restrict `jev` dispatch to exactly the `build`,
-`plan`, and `adversarial` agents, and SHALL additionally allow the
-global `opsx-propose` OpenSpec command to dispatch `jev` during
+The system SHALL restrict `triage` dispatch to exactly the `build`,
+`plan`, `adversarial`, `architect`, `orchestrator`, and `refactor` agents,
+and SHALL additionally allow the
+global `opsx-propose` OpenSpec command to dispatch `triage` during
 proposal planning. Every other agent and every other command SHALL
-NOT dispatch `jev`. The acceptance harness SHALL fail if the
+NOT dispatch `triage`. The acceptance harness SHALL fail if the
 dispatcher list drifts from this rule.
 
-#### Scenario: build dispatches jev
+#### Scenario: build dispatches triage
 
-- **WHEN** the `build` agent calls the `task` tool with `agent: "jev"`
+- **WHEN** the `build` agent calls the `task` tool with `agent: "triage"`
 - **THEN** the dispatch is allowed by the routing matrix and the
   harness agrees
 
-#### Scenario: general agent does NOT dispatch jev
+#### Scenario: general agent does NOT dispatch triage
 
-- **WHEN** the `general` agent calls the `task` tool with `agent: "jev"`
+- **WHEN** the `general` agent calls the `task` tool with `agent: "triage"`
 - **THEN** the routing matrix denies the dispatch under the strict
   scope gate
 
-#### Scenario: opsx-propose may use jev
+#### Scenario: opsx-propose may use triage
 
 - **WHEN** the global `opsx-propose` command runs and needs a
   calibrated triage during proposal planning
-- **THEN** the command MAY dispatch `jev` with a bounded brief, and
-  the proposal that follows MAY cite the Jev recommendation as
+- **THEN** the command MAY dispatch `triage` with a bounded brief, and
+  the proposal that follows MAY cite the Triage recommendation as
   supporting evidence
 
-#### Scenario: opsx-apply does NOT dispatch jev
+#### Scenario: opsx-apply does NOT dispatch triage
 
 - **WHEN** the global `opsx-apply` command runs
-- **THEN** it SHALL NOT dispatch `jev` because implementation is not
-  a triage activity; Jev's role is advisory
+- **THEN** it SHALL NOT dispatch `triage` because implementation is not
+  a triage activity; Triage's role is advisory
 
 ### Requirement: Agents opt in to the value tier when no implementation work is required
 

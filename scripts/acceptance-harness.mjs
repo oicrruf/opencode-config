@@ -176,7 +176,7 @@ const EXPECTED_AGENT_MODELS = {
   adversarial: 'openai/gpt-5.6-terra',
   cotizador: 'openai/gpt-5.6-terra',
   'p5t-installer': 'ollama-cloud/gpt-oss:20b',
-  jev: 'ollama-cloud/gpt-oss:20b',
+  triage: 'ollama-cloud/gpt-oss:20b',
 };
 
 check('resolved config matches the routing matrix for every agent', () => {
@@ -284,26 +284,26 @@ check('every configured model id is served by an authenticated provider', () => 
   return `${ids.length} ids resolve`;
 });
 
-check('no MCP tool family references jev in any agent permission', () => {
+check('no MCP tool family references triage in any agent permission', () => {
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
   const offenders = [];
   for (const [agent, body] of Object.entries(cfg.agent ?? {})) {
     const perms = body?.permission || {};
-    if (perms['jev_*'] === 'allow' || perms.jev === 'allow') {
-      offenders.push(`${agent}: unexpected jev_* or jev allow permission`);
+    if (perms['jev_*'] === 'allow' || perms.triage === 'allow') {
+      offenders.push(`${agent}: unexpected jev_* or triage allow permission`);
     }
   }
   assert(offenders.length === 0, offenders.join('; '));
-  return `${Object.keys(cfg.agent ?? {}).length} agents deny jev tools`;
+  return `${Object.keys(cfg.agent ?? {}).length} agents deny triage tools`;
 });
 
-check('rendered config does not declare a Jev MCP server', () => {
+check('rendered config does not declare a Triage MCP server', () => {
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
   assert(
-    !(cfg.mcp && cfg.mcp.jev),
-    `rendered config still declares mcp.jev: ${JSON.stringify(cfg.mcp?.jev)}`,
+    !(cfg.mcp && cfg.mcp.triage),
+    `rendered config still declares mcp.triage: ${JSON.stringify(cfg.mcp?.triage)}`,
   );
-  return 'mcp.jev absent from rendered config';
+  return 'mcp.triage absent from rendered config';
 });
 
 check('renderer no longer substitutes {__repo_root__}', () => {
@@ -372,14 +372,14 @@ check('no wrapper copies skill content (injects only)', () => {
   return 'all wrappers inject from the canonical path';
 });
 
-check('only build, plan, and adversarial may dispatch the jev subagent', () => {
+check('only approved decision agents may dispatch the triage subagent', () => {
   // `opsx-propose` is a command that runs in the default agent (build)
   // and therefore inherits build's dispatch rights. The harness encodes
   // the explicit allow-list named in
   // `openspec/specs/agent-routing/spec.md` and
-  // `openspec/specs/jev-decision-agent/spec.md`.
+  // `openspec/specs/triage-decision-agent/spec.md`.
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
-  const allowed = ['build', 'plan', 'adversarial'];
+  const allowed = ['build', 'plan', 'adversarial', 'architect', 'orchestrator', 'refactor'];
   const offenders = [];
   for (const [agent, body] of Object.entries(cfg.agent ?? {})) {
     const perms = body?.permission || {};
@@ -388,7 +388,7 @@ check('only build, plan, and adversarial may dispatch the jev subagent', () => {
     if (allowed.includes(agent)) {
       if (!hasTaskAllow) offenders.push(`${agent}: missing task: allow`);
     } else if (hasTaskAllow && !hasExplicitDeny) {
-      offenders.push(`${agent}: unexpected task: allow (only ${allowed.join(', ')} may dispatch jev)`);
+      offenders.push(`${agent}: unexpected task: allow (only ${allowed.join(', ')} may dispatch triage)`);
     }
   }
   assert(offenders.length === 0, offenders.join('; '));

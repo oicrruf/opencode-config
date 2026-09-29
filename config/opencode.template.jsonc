@@ -126,6 +126,7 @@
           "codegraph *": "allow",
           "openspec *": "allow"
         },
+        "task": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow",
@@ -141,6 +142,7 @@
           "openspec *": "allow",
           "git *": "allow"
         },
+        "task": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow"
@@ -151,6 +153,7 @@
       "permission": {
         "edit": "allow",
         "bash": "ask",
+        "task": "allow",
         "external_directory": "allow",
         "question": "allow",
         "codegraph_*": "allow",
@@ -177,7 +180,7 @@
         "context7_*": "allow"
       }
     },
-    "jev": {
+    "triage": {
       "steps": 25,
       "permission": {
         "edit": "deny",

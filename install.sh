@@ -91,7 +91,7 @@ full process.
 
 Post-install verification:
   After linking resources, install.sh runs the project's required gates
-  (profile tests, Jev client self-tests, static acceptance harness,
+  (profile tests, Triage client self-tests, static acceptance harness,
   and openspec validate --specs --strict --type spec). On success the
   final line is `install.sh: OK — <p>/<r> gates passed (<s> skipped)`.
 

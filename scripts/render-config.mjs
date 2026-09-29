@@ -153,7 +153,7 @@ function main() {
 
   // Local MCP command paths are now expected to already be absolute in the
   // template. The previous `{__repo_root__}` placeholder machinery was used
-  // by the now-removed Jev adapter; keeping the renderer strict means a
+  // by the now-removed Triage adapter; keeping the renderer strict means a
   // future agent that ships an MCP server must commit to an absolute path
   // or fail validation, instead of silently rewriting a relative token.
   if (template.mcp && typeof template.mcp === 'object') {

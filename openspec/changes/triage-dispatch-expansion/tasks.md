@@ -1,0 +1,3 @@
+- [x] Update triage allowlist and agent permissions.
+- [x] Update routing specs and acceptance checks.
+- [x] Render and validate the installed configuration.

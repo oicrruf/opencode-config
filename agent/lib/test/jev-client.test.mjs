@@ -81,7 +81,7 @@ test("noul brief returns recommendation and confidence", async () => {
     );
   }, () => consult(NICOUL_BRIEF));
   assert.equal(result.status, "ok");
-  assert.match(result.recommendation, /is_urgent=noul\(0\.92\)/);
+  assert.match(result.recommendation, /"is_urgent":\{"type":"noul","noul":0\.92\}/);
   assert.equal(result.confidence, 0.92);
   assert.equal(result.details.raw.model, "typesafe/jev-1.13-20260917");
 });
@@ -133,6 +133,8 @@ test("missing credentials surface as structured unavailability", async () => {
     assert.equal(result.status, "unavailable");
     assert.equal(result.details.reason, "missing_credentials");
     assert.match(result.details.hint, /OPENROUTER_API_KEY/);
+    assert.match(result.details.hint, /optional/i);
+    assert.match(result.details.hint, /continue without Triage/i);
     assert.equal(typeof result.details.deadlineMs, "number");
   });
 });
