@@ -1,15 +1,4 @@
-# installer-portability Specification
-
-## Purpose
-Define the cross-platform installer contract: the four supported
-shells, the path-translation behaviour, the `node` binary resolution
-rules, the line-ending contract enforced by `.gitattributes` and
-check #9, and the platform report emitted by `install.sh --help`.
-The contract is the single source of truth for "where does
-`install.sh` work" so the README, the doctor agent, and the
-acceptance harness do not drift.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Installer runs to completion on every supported shell
 
@@ -99,42 +88,11 @@ and `unzip` (Nerd Font extraction).
   fails non-fatally, and the rest of the install (link step, gate
   summary) completes
 
-### Requirement: Installer resolves the node binary reliably
-
-The system SHALL resolve the node binary before invoking any `node`
-subprocess. The resolution SHALL try `node` first, then `node.exe`,
-and SHALL validate that the resolved path is executable. Every
-subsequent `node …` call in `install.sh` SHALL use the resolved
-binary, not a bare `node` literal.
-
-#### Scenario: node is on PATH
-
-- **WHEN** the operator has `node` on PATH and runs
-  `bash ./install.sh --profile personal`
-- **THEN** `install.sh` resolves `node`, threads it through every
-  `node …` call, and proceeds without printing an error
-
-#### Scenario: only node.exe is on PATH
-
-- **WHEN** the operator has only `node.exe` on PATH (Windows native
-  install) and runs `bash ./install.sh --profile personal`
-- **THEN** `install.sh` resolves `node.exe`, validates it is
-  executable, threads it through every `node …` call, and proceeds
-  without printing the `node is required` error
-
-#### Scenario: node is missing
-
-- **WHEN** the operator has neither `node` nor `node.exe` on PATH
-  and runs `bash ./install.sh --profile personal`
-- **THEN** `install.sh` exits non-zero with the message
-  `install.sh: node is required to render the selected profile; install Node.js >= 18.`
-  and prints the same prerequisite line in the doctor summary
-
 ### Requirement: Installer translates WSL and Git Bash paths to Windows
 
 The system SHALL translate `$repo_dir` to a Windows path when
-`install.sh` runs under WSL Ubuntu or Git Bash on Windows, so that
-the renderer and validator — which are invoked as `node.exe`
+`install.sh` runs under WSL Ubuntu or Git Bash on Windows, so that the
+renderer and validator — which are invoked as `node.exe`
 subprocesses — receive a path their filesystem API can open. The
 translation SHALL normalize the result to forward slashes so that
 subsequent concatenation with `"/config/..."` produces a path
@@ -157,17 +115,17 @@ recommend moving the clone under `/home` or setting
 `XDG_CONFIG_HOME` deliberately. The warning SHALL be non-fatal; the
 install SHALL continue and the gate summary SHALL print.
 
-#### Scenario: WSL Ubuntu with repo under /mnt/c
+#### Scenario: WSL Ubuntu with repo under /mnt/<drive>
 
 - **WHEN** `install.sh` runs from WSL Ubuntu with `$repo_dir`
   matching `/mnt/[a-zA-Z]/*` and `wslpath` on PATH
 - **THEN** the installer runs `wslpath -w "$repo_dir"` and
   normalizes any backslashes to forward slashes before using the
   result as the path passed to `node.exe`. For example,
-  `$repo_dir=/mnt/c/Users/o/Projects/opencode-config` becomes
-  `<drive>:/<path>` with forward slashes throughout.
+  `/mnt/<drive>/<path>` becomes `<drive>:/<path>` with forward
+  slashes throughout.
 
-#### Scenario: Git Bash on Windows with repo under /c/
+#### Scenario: Git Bash on Windows with repo under /<drive>/
 
 - **WHEN** `install.sh` runs from Git Bash on Windows with `$repo_dir`
   matching `/mnt/[a-zA-Z]/*` and `wslpath` absent but `cygpath` on
@@ -215,91 +173,3 @@ install SHALL continue and the gate summary SHALL print.
   `config_dir` will be on the Linux side while the repository is on
   the Windows side, then continues and prints
   `OpenCode configuration linked from <repo_dir>`
-
-### Requirement: Installer warns when it resolves a Windows node on WSL
-
-The system SHALL detect when `install.sh` resolves a Windows `node.exe`
-while running on a Linux shell under WSL, and SHALL print a warning before
-invoking any node subprocess. The warning SHALL name that `os.homedir()`
-inside node is the Windows profile, so the models catalog is looked up on
-the Windows side and the catalog check is skipped rather than satisfied;
-that the configuration directory is derived from the Linux `$HOME` while
-`opencode.exe` reads the Windows profile; and that installing a native Linux
-Node.js >= 18 removes these conditions.
-
-The installer SHALL NOT treat the condition as fatal. It SHALL continue and
-complete the install. The warning SHALL NOT be printed when the resolved
-node is a native `node`, and SHALL NOT be printed when a Windows node is
-resolved from Git Bash on Windows, where a Windows node and a Windows home
-are the expected pairing.
-
-#### Scenario: WSL with only node.exe on PATH warns and installs
-
-- **WHEN** the operator runs `bash ./install.sh --profile personal` under
-  WSL with only `node.exe` on PATH and the repository under `$HOME`
-- **THEN** the installer prints the warning naming the Windows-side home,
-  the skipped catalog check, and the Linux install target, then continues
-  and prints `OpenCode configuration linked from <repo_dir>`
-
-#### Scenario: native Linux with node prints no warning
-
-- **WHEN** the operator runs `bash ./install.sh --profile personal` on a
-  native Linux host with `node` on PATH
-- **THEN** the installer prints no WSL/node warning and proceeds
-
-#### Scenario: Git Bash on Windows with node.exe prints no warning
-
-- **WHEN** the operator runs `bash ./install.sh --profile personal` from
-  Git Bash on Windows, where `node.exe` is the only node on PATH and the
-  shell's `$HOME` is the Windows user profile
-- **THEN** the installer prints no WSL/node warning, because the node home
-  and the shell home are the same profile
-
-#### Scenario: the warning precedes the validator output
-
-- **WHEN** the warning fires
-- **THEN** it is printed before the first `node` subprocess runs, so the
-  operator reads the cause before the validator's own catalog-skip notice
-
-### Requirement: Repository tracks LF for shell and runtime files
-
-The system SHALL keep shell and runtime files at LF in the Git
-index. `.gitattributes` SHALL declare `* text=auto eol=lf` so every
-new commit and every fresh checkout use LF for text content. The
-validator SHALL refuse to pass when any tracked file with a
-shell or runtime extension has CRLF in its index blob.
-
-#### Scenario: A new contributor commits a CRLF .sh file
-
-- **WHEN** a contributor on a Windows checkout with
-  `core.autocrlf=true` adds a new `scripts/install-nerd-fonts.sh`
-  with CRLF endings and runs `node scripts/validate-config.mjs`
-- **THEN** the validator exits non-zero with the message
-  `scripts/install-nerd-fonts.sh: file has CRLF line endings; repository requires LF (see .gitattributes)`
-
-#### Scenario: A tracked .mjs file gains a CRLF pair
-
-- **WHEN** any tracked `.mjs` file ends up with a `\r\n` byte
-  sequence in the Git index
-- **THEN** `validate-config.mjs` exits non-zero and names the file
-
-#### Scenario: A binary fixture is committed
-
-- **WHEN** a contributor commits a font, image, or wasm fixture
-- **THEN** check #9 does not inspect the file because
-  `.gitattributes` classifies it as binary via `text=auto`, and the
-  validator does not raise a CRLF error
-
-#### Scenario: All shell and runtime files are LF
-
-- **WHEN** every tracked `.sh`, `.ps1`, `.mjs`, `.js`, `.ts`,
-  `.tsx`, `.cjs`, `.mts`, and `.cts` file has only LF line endings
-  in the Git index
-- **THEN** `node scripts/validate-config.mjs` exits zero and check
-  #9 contributes no failures
-
-### Requirement: Installer documents the supported shells in its help
-
-The system SHALL document the four supported shells and the per-shell
-prerequisites in `install.sh --help` so the operator does not need
-to consult the README to confirm whether their shell is supported.

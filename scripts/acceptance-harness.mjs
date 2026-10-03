@@ -212,6 +212,55 @@ check('committed wrapper skills remain strict rather than downgraded', () => {
   return 'archify is present and not git-ignored; missing committed targets remain validator failures';
 });
 
+check('install.sh creates the link target parent directory before symlinking', () => {
+  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
+  // The link() function in install.sh must create the target's parent
+  // directory so first-time installs on a fresh host do not abort with
+  // `ln: No such file or directory` when a subdirectory (notably plugins/)
+  // is missing. The `dirname --` defends against leading-dash targets.
+  assert(
+    /link\s*\(\)\s*\{[\s\S]*?dirname\s+--\s+"\$target"[\s\S]*?mkdir\s+-p\s+--\s+"\$target_dir"/.test(
+      installText,
+    ),
+    'install.sh link() must compute target_dir via `dirname -- "$target"` and `mkdir -p` it before `ln -sfn`',
+  );
+  return 'link() creates the target parent directory';
+});
+
+check('install.sh reports missing prerequisites before the Nerd Font step', () => {
+  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
+  // The hoisted check loops over the tools the rest of the script needs
+  // and prints an actionable install command for each missing one. The
+  // three tools named in the change are git (validator), curl (Nerd Font
+  // download), and unzip (Nerd Font extraction).
+  assert(
+    /for\s+prereq\s+in\s+git\s+curl\s+unzip/.test(installText),
+    'install.sh must loop over `git curl unzip` to surface missing prerequisites',
+  );
+  assert(
+    /apt-get install -y unzip/.test(installText),
+    'install.sh must print an apt-get install line for the unzip case',
+  );
+  return 'prerequisites are reported before the Nerd Font step';
+});
+
+check('install.sh warns when WSL native-node meets a /mnt repo', () => {
+  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
+  // Sibling of the WSL+Windows-node guard. Fires only when the resolved
+  // node is a native Linux binary AND the repository lives under
+  // /mnt/<drive>/, so config_dir on the Linux side and the repo on the
+  // Windows side end up disconnected.
+  assert(
+    /native node and repository on the Windows side/.test(installText),
+    'install.sh must warn when WSL native-node meets a /mnt/<drive>/ repository',
+  );
+  assert(
+    /XDG_CONFIG_HOME/.test(installText),
+    'the warning must recommend XDG_CONFIG_HOME as one of the remediations',
+  );
+  return 'WSL + native node + /mnt/<drive>/ repo warns about config_dir split';
+});
+
 // ---------------------------------------------------------------------------
 // routing
 // ---------------------------------------------------------------------------

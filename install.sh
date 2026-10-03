@@ -73,6 +73,12 @@ Supported shells:
   - WSL Ubuntu bash             bash ./install.sh --profile personal
   - Git Bash on Windows         bash ./install.sh --profile personal
 
+  WSL note: if only node.exe is on PATH, the validator looks for the model
+  catalog under the Windows home while configuration links target Linux
+  $HOME. Install native Linux Node.js >= 18, or set XDG_CONFIG_HOME
+  deliberately when targeting Windows OpenCode. A repo under /home is not
+  translated with wslpath and relies on WSL interop path resolution.
+
 Path translation:
   When the repository lives under /mnt/<drive>/... (WSL Ubuntu) or
   /<drive>/... (Git Bash on Windows), the installer translates repo_dir
@@ -153,6 +159,86 @@ NODE_BIN="$(command -v node 2>/dev/null || true)"
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
   printf 'install.sh: node is required to render the selected profile; install Node.js >= 18.\n' >&2
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Early prerequisite check (non-fatal)
+# ---------------------------------------------------------------------------
+#
+# The Nerd Font step needs `curl` to download the latest release and `unzip`
+# to extract it; the validator's check #9 needs `git` to inspect the index.
+# On a clean WSL Ubuntu host none of these are present by default. We warn
+# now, before the install tries to use them, so the operator learns the
+# remediation while the context is still about installation. The warnings are
+# non-fatal: the existing non-fatal Nerd Font step stays non-fatal, and the
+# validator already degrades gracefully when `git` is absent.
+
+prereqs_missing=0
+for prereq in git curl unzip; do
+  if ! command -v "$prereq" >/dev/null 2>&1; then
+    case "$prereq" in
+      git)
+        printf 'install.sh: warning — git is required by the line-ending check; the validator will skip the catalog and CRLF checks without it\n' >&2
+        ;;
+      curl)
+        printf 'install.sh: warning — curl is required to download the JetBrainsMono Nerd Font archive; install with: apt-get install -y curl\n' >&2
+        ;;
+      unzip)
+        printf 'install.sh: warning — unzip is required to extract the Nerd Font archive; install with: apt-get install -y unzip\n' >&2
+        ;;
+    esac
+    prereqs_missing=$((prereqs_missing + 1))
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# WSL guard: a Windows node running from a Linux shell resolves its home to
+# the Windows profile, so the models catalog is looked up on the Windows side
+# and the catalog check is skipped rather than satisfied, and the install
+# target below is the Linux path while opencode.exe reads the Windows one.
+# Warn and continue; a WSL host with a Windows node is a supported shell for
+# a repository under /mnt/<drive>, so this must not be fatal.
+#
+# Git Bash on Windows also resolves node.exe, but there the node home and the
+# shell home are the same profile, so requiring both signals keeps the
+# warning off that supported path.
+# ---------------------------------------------------------------------------
+
+case "$NODE_BIN" in
+  *.exe|*.EXE) node_is_windows=1 ;;
+  *)          node_is_windows=0 ;;
+esac
+
+if [ "$node_is_windows" = "1" ] &&
+   { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; }; then
+  windows_home="$("$NODE_BIN" -e 'process.stdout.write(require("os").homedir())' 2>/dev/null || true)"
+  printf 'install.sh: warning — WSL with a Windows node (%s)\n' "$NODE_BIN" >&2
+  printf '  - node resolves its home to %s, so ~/.cache/opencode/models.json is read from the Windows profile and the models catalog check is skipped, not satisfied.\n' \
+    "${windows_home:-an unknown Windows home}" >&2
+  printf '  - the configuration will be linked under %s (Linux), while opencode.exe reads the Windows profile.\n' \
+    "$config_dir" >&2
+  case "$repo_dir" in
+    /mnt/[a-zA-Z]/*)
+      ;;
+    *)
+      printf '  - the repository is at %s, which wslpath does not translate; node resolves it only through the WSL interop UNC working directory.\n' \
+        "$repo_dir" >&2
+      ;;
+  esac
+  printf '  - install a native Linux Node.js >= 18 to remove all of these conditions.\n' >&2
+fi
+
+# Sibling check: WSL with a native Linux node and a repository under
+# /mnt/<drive>/. The native node does not need a Windows path, so the
+# translation block is a no-op; but config_dir is derived from the Linux
+# $HOME while the repository is on the Windows side, so the install lands
+# in a place opencode.exe will not read. Warn and continue.
+if [ "$node_is_windows" = "0" ] &&
+   { [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; } &&
+   case "$repo_dir" in /mnt/[a-zA-Z]/*) true ;; *) false ;; esac; then
+  printf 'install.sh: warning — WSL with native node and repository on the Windows side (%s)\n' "$repo_dir" >&2
+  printf '  - configuration will be linked under %s (Linux), while the repository is on the Windows side.\n' "$config_dir" >&2
+  printf '  - move the clone under /home or set XDG_CONFIG_HOME deliberately to target the right profile.\n' >&2
 fi
 
 DEFAULT_PROFILE="$("$NODE_BIN" -e "
@@ -276,6 +362,15 @@ link() {
     local backup="${target}.bak.$(date +%Y%m%d%H%M%S)"
     mv "$target" "$backup"
     printf 'Backed up existing path to %s\n' "$backup" >&2
+  fi
+
+  # Create the target's parent directory if it does not exist, so first-time
+  # installs on a fresh host complete without operator `mkdir` workarounds.
+  # `dirname --` protects against targets that begin with `-`.
+  local target_dir
+  target_dir="$(dirname -- "$target")"
+  if [ ! -d "$target_dir" ]; then
+    mkdir -p -- "$target_dir"
   fi
 
   ln -sfn "$source" "$target"

@@ -23,6 +23,15 @@ symlinking it. The previous root config is backed up to
 installer refuses to replace existing non-link paths. The Herdr-managed
 plugin is left untouched.
 
+The `mmx-cli` skill is an optional, local-only checkout and is not included in
+this repository. On a fresh clone, installation succeeds with a warning that
+`/mmx` and `/mmx-h3-video` cannot inject their skill content until you link the
+checkout into `skills/mmx-cli`:
+
+```bash
+ln -s /path/to/mmx-cli skills/mmx-cli
+```
+
 Restart OpenCode after installing or pulling changes, because configuration is
 loaded only at startup.
 
@@ -69,6 +78,13 @@ documented in `bash ./install.sh --help`. The supported matrix is:
 PowerShell-native users launch one of the bash shells above (Git Bash from
 PowerShell is the canonical Windows path; WSL Ubuntu is the alternative).
 The installer is a bash script; it does not run natively in PowerShell.
+
+Under WSL, install a native Linux Node.js >= 18 when possible. If the
+installer falls back to Windows `node.exe`, it warns that model-catalog
+validation is skipped because the catalog lookup uses the Windows home, while
+configuration links still target the Linux `$HOME`. If intentionally
+installing for Windows OpenCode, set `XDG_CONFIG_HOME` to the desired Windows
+configuration directory before running the installer.
 
 Restart OpenCode after installing or pulling changes, because configuration is
 loaded only at startup.

@@ -239,6 +239,12 @@ installs. The check SHALL fail with the profile, consumer, and unresolved ID
 when the catalog is present and an ID is absent. The installer SHALL validate
 the selected profile before generating or replacing installed configuration.
 
+When the catalog lookup was performed by a Windows node, the skip notice
+SHALL additionally name that node resolved the catalog under the Windows user
+profile rather than the POSIX home, and SHALL name a native Node.js as the
+remedy. The extra line SHALL NOT be printed when the lookup ran under a
+native POSIX node.
+
 #### Scenario: a phantom model id fails the validator
 
 - **WHEN** `scripts/validate-config.mjs` runs for a profile that assigns
@@ -257,6 +263,14 @@ the selected profile before generating or replacing installed configuration.
 - **WHEN** `~/.cache/opencode/models.json` does not exist
 - **THEN** the script SHALL print a skip notice for the catalog check and SHALL
   NOT fail on it
+
+#### Scenario: a missing catalog under a Windows node explains itself
+
+- **WHEN** `scripts/validate-config.mjs` runs under `node.exe` (so
+  `process.platform` is `win32`) and no catalog exists at the resolved home
+- **THEN** the skip notice SHALL name the Windows user profile it searched,
+  SHALL state that the model ids were not checked, and SHALL name a native
+  Node.js as the way to have them checked
 
 ### Requirement: Triage is a value-tier decision specialist
 
