@@ -35,7 +35,7 @@
 //                          assignments and the profile.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, relative } from 'node:path';
+import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -45,6 +45,61 @@ const errors = [];
 
 function fail(file, message) {
   errors.push(`${relative(repoRoot, file)}: ${message}`);
+}
+
+// A referenced skill path that the repository's Git rules ignore is a
+// local-only skill: the operator links it from $HOME and it is never
+// committed (see .gitignore), so its absence is a warning rather than a
+// repository defect. Every other outcome — not ignored, or undecidable —
+// keeps the check strict, because this check is the only guard against a
+// wrapper that injects nothing.
+function isLocalOnlySkill(rel) {
+  const posix = join('skills', rel).split(sep).join('/');
+  try {
+    execFileSync('git', ['check-ignore', '-q', '--', posix], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return isIgnoredByLiteralRule(posix);
+  }
+}
+
+// Fallback for when `git check-ignore` cannot answer. That happens on a
+// Windows git running against a WSL checkout: the repository resolves to a
+// `\\wsl.localhost\...` UNC path, which git rejects as dubious ownership
+// (exit 128), so the authoritative lookup is unavailable exactly where the
+// operator most needs the distinction.
+//
+// The repository documents local-only skills as literal ignore entries
+// (`/skills/mmx-cli` in .gitignore), so a literal reader answers the
+// question for the documented form without a subprocess and identically
+// under Linux node and node.exe. Patterns carrying glob syntax are skipped
+// rather than guessed, so an unrecognized rule stays strict.
+function isIgnoredByLiteralRule(candidate) {
+  let text;
+  try {
+    text = readFileSync(join(repoRoot, '.gitignore'), 'utf8');
+  } catch {
+    return false;
+  }
+  const segments = candidate.split('/');
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith('!')) continue;
+    const anchored = line.startsWith('/');
+    const rule = (anchored ? line.slice(1) : line).replace(/\/+$/, '');
+    if (!rule || /[*?[]/.test(rule)) continue;
+    // An anchored rule matches from the repository root only; an unanchored
+    // literal matches at any depth, as git itself would resolve it.
+    const depth = anchored ? 1 : segments.length;
+    for (let i = 0; i < depth; i++) {
+      const suffix = segments.slice(i).join('/');
+      if (suffix === rule || suffix.startsWith(`${rule}/`)) return true;
+    }
+  }
+  return false;
 }
 
 function parseArgs(argv) {
@@ -358,6 +413,16 @@ function runSkillBudgetChecks() {
         const rel = match[1];
         const onDisk = join(repoRoot, 'skills', rel);
         if (!existsSync(onDisk)) {
+          if (isLocalOnlySkill(rel)) {
+            const top = rel.split('/')[0];
+            console.log(
+              `validate-config: warn — ${relative(repoRoot, file)} injects '${rel}' but ` +
+                `skills/${rel} does not exist; it is a local-only (git-ignored) skill, so the ` +
+                `command injects nothing until the operator links it ` +
+                `(ln -s <path-to>/${top} skills/${top})`,
+            );
+            continue;
+          }
           fail(file, `injects '${rel}' but skills/${rel} does not exist`);
         }
       }
@@ -494,6 +559,13 @@ function runProfileChecks() {
       `validate-config: skip — models catalog not found at ${catalogPath}; ` +
         `ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
     );
+    if (process.platform === 'win32') {
+      console.log(
+        `validate-config: skip — that is the Windows user profile (${homedir()}), not a POSIX ` +
+          `home, so node.exe searched for the catalog on the Windows side and no model id was ` +
+          `checked; install a native Node.js >= 18 to have them checked`,
+      );
+    }
   } else {
     let catalog = null;
     try {
