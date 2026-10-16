@@ -1,7 +1,7 @@
 ---
 description: Build agent. Classifies scope, applies small work directly, and coordinates OpenSpec and specialists for substantial changes.
 mode: primary
-steps: 60
+steps: 120
 permission:
   edit: allow
   bash: ask

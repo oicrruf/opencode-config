@@ -42,14 +42,14 @@ inherits from the class.
 | Agent                | Default model            | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
 |----------------------|--------------------------|---------|-------------|-----------|--------|----------|
 | `plan`               | `openai/gpt-5.6-luna`    | 100     | deny        | allow     | deny   | allow     |
-| `build`              | `ollama-cloud/gpt-oss:20b`| 60      | deny        | allow     | deny   | allow     |
-| `general`            | `ollama-cloud/gpt-oss:20b`| 40      | deny        | allow     | deny   | allow     |
+| `build`              | `ollama-cloud/gpt-oss:20b`| 120     | deny        | allow     | deny   | allow     |
+| `general`            | `ollama-cloud/gpt-oss:20b`| 80      | deny        | allow     | deny   | allow     |
 | `explore`            | `ollama-cloud/gpt-oss:20b` | 25    | deny        | allow     | deny   | deny      |
 | `architect`          | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `orchestrator`       | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
 | `refactor`           | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | allow  | allow     |
-| `frontend`           | `ollama-cloud/gpt-oss:20b`| 40      | allow       | allow     | deny   | deny      |
-| `backend`            | `ollama-cloud/gpt-oss:20b`| 40      | deny        | allow     | deny   | allow     |
+| `frontend`           | `ollama-cloud/gpt-oss:20b`| 80      | allow       | allow     | deny   | deny      |
+| `backend`            | `ollama-cloud/gpt-oss:20b`| 80      | deny        | allow     | deny   | allow     |
 | `qa`                 | `ollama-cloud/gpt-oss:20b`| 60      | allow       | allow     | deny   | deny      |
 | `adversarial`        | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
 | `cotizador`          | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |

@@ -14,6 +14,43 @@ validators.
   and `refactor` may raise it to `2`. Specialists do not dispatch further.
 - **Routing matrix.** Every agent MUST consult `agent/routing.md` before any
   tool call and state the work class with one sentence of evidence.
+- **Step budgets.** `build` runs at a ceiling of 120 model steps; `general`,
+  `frontend`, and `backend` run at 80; every other agent keeps its current
+  ceiling. These are finite ceilings, not quotas. After acceptance
+  conditions and required verification pass, the agent MUST stop instead
+  of consuming the remaining allowance. The four ceilings are declared in
+  three places — `config/opencode.template.jsonc`, the agent Markdown
+  frontmatter when present, and `agent/routing.md` — and a structural
+  check in `scripts/acceptance-harness.mjs` fails the build when any of
+  those declarations drift. The ceilings only take effect after the
+  operator runs `./install.sh` (which renders the template into the
+  active profile and replaces `~/.config/opencode/opencode.jsonc`); until
+  then a previously-installed session keeps the prior ceilings, and a
+  project-local `opencode.jsonc` overrides the installed values. To roll
+  back, restore the previous ceilings in the three declaration sites,
+  re-run the validator, and reinstall the same profile.
+- **Step efficiency.** Reuse relevant evidence already obtained instead of
+  re-running a successful discovery without a concrete reason. Group
+  independent reads or queries when tool capabilities and dependency
+  ordering permit; do not parallelize dependent edits or checks.
+  Coordinators divide long work into bounded verifiable units within the
+  existing scope and delegation gates. Efficiency MUST NOT bypass
+  required verification, permissions, planning boundaries, or review.
+- **Interruption handoff.** When the runtime reports that the step ceiling
+  is reached, the agent MUST stop and produce a compact text handoff in
+  its next assistant turn instead of attempting another tool call. The
+  handoff covers: (1) completed work and the files changed, (2) pending
+  work in the order it should be done, (3) verification that was run and
+  verification that was not run, (4) blockers or risks the next agent
+  must consider, and (5) the next manual action for the user. Do not
+  claim an exact remaining-step counter (the runtime does not expose
+  one) and do not restart automatically. Specialists preserve the
+  existing structured return fields (classification, decision, changed
+  files, verification results, blockers, OpenSpec task impact) and place
+  pending work and next actions inside the appropriate field rather
+  than inventing new ones. A documented fixture in
+  `docs/contracts/interruption-handoff.md` shows the expected shape for
+  primary and specialist agents.
 - **OpenSpec workflow.** Durable changes — new features, behaviour changes,
   new profiles, profile edits, schema migrations — go through
   `openspec/changes/<change-name>/`. The workflow is: explore (optional) →

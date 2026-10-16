@@ -314,6 +314,183 @@ check('frontmatter and opencode.jsonc agree on every agent model', () => {
   return 'frontmatter and jsonc agree';
 });
 
+// Step ceilings are declared in three places — the agent Markdown
+// frontmatter when present, the OpenCode JSONC rendered for the active
+// profile, and the template that the renderer reads. The contract from
+// the improve-agent-step-budgets change is selective: build moves to
+// 120, general/frontend/backend to 80, and every other agent's ceiling
+// stays where it was. This check pins all three surfaces together so a
+// future edit cannot silently drift.
+const STEPS_BY_AGENT = {
+  plan: 100,
+  build: 120,
+  general: 80,
+  frontend: 80,
+  backend: 80,
+  explore: 25,
+  architect: 100,
+  orchestrator: 100,
+  refactor: 100,
+  qa: 60,
+  adversarial: 100,
+  cotizador: 100,
+  'p5t-installer': 100,
+  doctor: 100,
+  triage: 25,
+};
+
+check('step ceilings agree across frontmatter, rendered config, and template', () => {
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const tpl = readJsonc(join(repoRoot, 'config/opencode.template.jsonc'));
+  const dir = join(repoRoot, 'agent');
+  const mismatches = [];
+
+  for (const [agent, expected] of Object.entries(STEPS_BY_AGENT)) {
+    const rendered = cfg.agent?.[agent]?.steps;
+    const templateSteps = tpl.agent?.[agent]?.steps;
+    if (rendered !== expected) {
+      mismatches.push(`rendered ${agent}=${rendered}, expected ${expected}`);
+    }
+    if (templateSteps !== expected) {
+      mismatches.push(`template ${agent}=${templateSteps}, expected ${expected}`);
+    }
+    const file = join(dir, `${agent}.md`);
+    if (existsSync(file)) {
+      const fm = readFrontmatter(file);
+      const fmSteps = fm?.steps != null ? Number(fm.steps) : null;
+      if (fmSteps !== null && fmSteps !== expected) {
+        mismatches.push(`frontmatter ${agent}=${fmSteps}, expected ${expected}`);
+      }
+    }
+  }
+  assert(mismatches.length === 0, mismatches.join('; '));
+  return `${Object.keys(STEPS_BY_AGENT).length} agents agree on the documented ceilings`;
+});
+
+check('step ceiling table in agent/routing.md agrees with the template', () => {
+  // The routing table is the human-readable contract; if it drifts from
+  // the template the structural check above can still pass while the
+  // operator reads a stale number. Walk the markdown table and confirm
+  // each agent's `steps` cell matches the documented STEPS_BY_AGENT.
+  // The routing table is intentionally limited to the agents whose
+  // tool surface the matrix needs to enumerate; agents that are not
+  // listed (e.g. `triage`, which the routing table does not surface
+  // because it never dispatches from the coordinator) are excluded
+  // from this check and covered by the structural check above.
+  const ROUTING_TABLE_AGENTS = [
+    'plan', 'build', 'general', 'explore', 'architect', 'orchestrator',
+    'refactor', 'frontend', 'backend', 'qa', 'adversarial', 'cotizador',
+    'p5t-installer', 'doctor',
+  ];
+  const routingText = readFileSync(join(repoRoot, 'agent/routing.md'), 'utf8');
+  const mismatches = [];
+  for (const agent of ROUTING_TABLE_AGENTS) {
+    const expected = STEPS_BY_AGENT[agent];
+    // Match a `| `agent`` row and capture the third cell (the `steps`).
+    const re = new RegExp(
+      `^\\|\\s+\`${agent.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\`\\s*\\|\\s*[^|]+\\|\\s*(\\d+)\\s*\\|`,
+      'm',
+    );
+    const m = routingText.match(re);
+    if (!m) {
+      mismatches.push(`${agent}: not found in routing table`);
+      continue;
+    }
+    const tableSteps = Number(m[1]);
+    if (tableSteps !== expected) {
+      mismatches.push(`routing.md ${agent}=${tableSteps}, expected ${expected}`);
+    }
+  }
+  assert(mismatches.length === 0, mismatches.join('; '));
+  return `${ROUTING_TABLE_AGENTS.length} routing rows match the documented ceilings`;
+});
+
+check('step efficiency and recovery policy is present in shared guidance', () => {
+  // The improve-agent-step-budgets change introduces shared guidance
+  // for evidence reuse, independent discovery batching, bounded units,
+  // early stop, and budget-exhaustion recovery. The policy must live
+  // in AGENTS.md and agent/routing.md; build.md may reference it.
+  const agentsText = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  const routingText = readFileSync(join(repoRoot, 'agent/routing.md'), 'utf8');
+  const buildText = readFileSync(join(repoRoot, 'agent/build.md'), 'utf8');
+
+  const required = [
+    { file: 'AGENTS.md', text: agentsText, needle: /Step budgets/ },
+    { file: 'AGENTS.md', text: agentsText, needle: /Step efficiency/ },
+    { file: 'AGENTS.md', text: agentsText, needle: /ceiling/i },
+    { file: 'agent/routing.md', text: routingText, needle: /ceiling/i },
+    { file: 'agent/routing.md', text: routingText, needle: /`steps`/ },
+    { file: 'agent/routing.md', text: routingText, needle: /quota/i },
+  ];
+  const missing = [];
+  for (const { file, text, needle } of required) {
+    if (!needle.test(text)) missing.push(`${file} missing ${needle}`);
+  }
+  // The coordinator must continue to read the routing matrix; the
+  // shared policy is referenced from there rather than duplicated.
+  assert(
+    /AGENTS\.md/i.test(buildText) || /agent\/routing\.md/i.test(buildText),
+    'agent/build.md must reference the shared guidance (AGENTS.md or agent/routing.md)',
+  );
+  assert(missing.length === 0, missing.join('; '));
+  return 'shared step-budget and efficiency policy is present';
+});
+
+check('interruption handoff policy and fixture are present and shaped', () => {
+  // The policy says: stop on step-ceiling exhaustion, produce a text
+  // handoff with five sections, do not claim an exact counter, do not
+  // restart automatically, and preserve specialist structured fields.
+  // The fixture documents the expected shape so a future check can
+  // validate both variants.
+  const agentsText = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  assert(/Interruption handoff/.test(agentsText), 'AGENTS.md must declare the Interruption handoff policy');
+  for (const section of ['completed', 'pending', 'verification', 'risks', 'next manual']) {
+    assert(
+      new RegExp(section, 'i').test(agentsText),
+      `AGENTS.md interruption handoff policy must mention '${section}'`,
+    );
+  }
+  assert(
+    /do not restart automatically/i.test(agentsText),
+    'AGENTS.md must forbid automatic restart after exhaustion',
+  );
+  assert(
+    /exact remaining-step counter/i.test(agentsText),
+    'AGENTS.md must say the runtime does not expose an exact remaining-step counter',
+  );
+  assert(
+    /classification[\s\S]{0,200}decision[\s\S]{0,200}changed[\s\n]+files[\s\S]{0,300}verification results[\s\S]{0,200}blockers[\s\S]{0,200}OpenSpec task impact/i.test(
+      agentsText,
+    ),
+    'AGENTS.md must require specialists to preserve the existing structured return fields',
+  );
+
+  const fixturePath = join(
+    repoRoot,
+    'docs/contracts/interruption-handoff.md',
+  );
+  assert(existsSync(fixturePath), 'interruption handoff fixture is missing');
+  const fixture = readFileSync(fixturePath, 'utf8');
+  for (const section of ['## Primary agent handoff', '## Specialist handoff']) {
+    assert(fixture.includes(section), `fixture must contain '${section}'`);
+  }
+  const primarySection = fixture.split('## Specialist handoff')[0];
+  for (const heading of ['completed', 'pending', 'verification run', 'verification not run', 'risks', 'next manual action']) {
+    assert(
+      new RegExp(heading, 'i').test(primarySection),
+      `fixture primary section must contain '${heading}'`,
+    );
+  }
+  const specialistSection = fixture.split('## Specialist handoff')[1] || '';
+  for (const field of ['classification', 'decision', 'changed files', 'verification results', 'blockers', 'OpenSpec task impact']) {
+    assert(
+      new RegExp(field, 'i').test(specialistSection),
+      `fixture specialist section must contain '${field}'`,
+    );
+  }
+  return 'interruption handoff policy and fixture are present and shaped';
+});
+
 check('small_model is on the value tier', () => {
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
   assert(

@@ -62,7 +62,7 @@
       }
     },
     "build": {
-      "steps": 60,
+      "steps": 120,
       "permission": {
         "edit": "allow",
         "bash": "ask",
@@ -72,7 +72,7 @@
       }
     },
     "general": {
-      "steps": 40,
+      "steps": 80,
       "permission": {
         "edit": "ask",
         "codegraph_*": "allow",
@@ -80,7 +80,7 @@
       }
     },
     "frontend": {
-      "steps": 40,
+      "steps": 80,
       "permission": {
         "edit": "allow",
         "bash": "ask",
@@ -89,7 +89,7 @@
       }
     },
     "backend": {
-      "steps": 40,
+      "steps": 80,
       "permission": {
         "edit": "allow",
         "bash": "ask",
