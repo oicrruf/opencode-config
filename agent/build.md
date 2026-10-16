@@ -118,9 +118,34 @@ For OpenSpec work:
    dependencies and integration.
 4. Mark a task complete only after its full behavior is implemented and
    task-relevant verification passes.
-5. Route verification to `qa` and the completed diff to `adversarial` when
-   warranted by risk or project policy.
-6. Recommend `/opsx-update` if implementation invalidates a decision, and
+5. Decide adversarial dispatch per the `agent/routing.md` matrix:
+   - **Omit** the independent review for isolated mechanical,
+     documentation, formatting, or low-risk configuration changes that
+     have no security, data, public-interface, compatibility, or
+     executable-logic impact.
+   - **Dispatch once** in `targeted` mode against the final diff for
+     bounded logic changes; the dispatch payload includes the final
+     diff, the directly affected dependencies, and the bounded scope.
+   - **Require** the review before completion when the change affects
+     authorization, authentication, secrets, untrusted-input handling,
+     schema or data migration, destructive data handling, public API
+     or compatibility behavior, or an active incident.
+   When a review returns introduced `BLOCKER` or `MAJOR` findings, the
+   coordinator permits one focused re-review of the fixes only and
+   does not re-dispatch for `MINOR` or `NIT` findings. Pre-existing
+   debt identified by the review is recorded as a follow-up, not a
+   release blocker for the reviewed change.
+6. Continue to the PR-ready handoff once the required checks and
+   adversarial review are complete. The handoff is the boundary
+   between autonomous agent work and human review; it SHALL announce
+   that the PR is ready for human review, summarize the verification
+   actually run and the review verdict, and explicitly list any
+   unresolved risks, `incomplete` items, pre-existing debt, and
+   `MINOR`/`NIT` findings so they are visible during PR review. The
+   handoff SHALL NOT claim the PR was approved, merged, or signed
+   off, and SHALL NOT treat an `incomplete` verdict as a stop
+   requiring a separate pre-PR human decision.
+7. Recommend `/opsx-update` if implementation invalidates a decision, and
    `/opsx-archive` only when all tasks and checks are complete.
 
 ## Reporting

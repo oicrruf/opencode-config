@@ -487,27 +487,202 @@ check('no wrapper copies skill content (injects only)', () => {
   return 'all wrappers inject from the canonical path';
 });
 
+check('adversarial reviewer is read-only and non-recursive', () => {
+  // The optimize-adversarial-review-gates change makes the reviewer
+  // read-only and forbids nested specialist dispatch from a review
+  // session. The harness encodes that contract statically so a future
+  // permission edit cannot silently re-enable recursion.
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const adv = cfg.agent?.adversarial?.permission ?? {};
+  assert(adv.edit === 'deny', `adversarial.edit is ${adv.edit ?? '(unset)'}, expected deny`);
+  assert(adv.bash === 'deny', `adversarial.bash is ${adv.bash ?? '(unset)'}, expected deny`);
+  assert(adv.task === 'deny', `adversarial.task is ${adv.task ?? '(unset)'}, expected deny`);
+  const advText = readFileSync(join(repoRoot, 'agent', 'adversarial.md'), 'utf8');
+  assert(
+    /read-only/i.test(advText) && /never\s+dispatch/i.test(advText),
+    'agent/adversarial.md must state it is read-only and must never dispatch a nested specialist',
+  );
+  assert(
+    /targeted[\s\S]{0,200}final\s+diff/i.test(advText),
+    'agent/adversarial.md must constrain targeted reviews to the final diff and directly affected dependencies',
+  );
+  assert(
+    /introduced[\s\S]{0,80}pre-existing[\s\S]{0,80}unverifiable/.test(advText),
+    'agent/adversarial.md must label findings with introduced/pre-existing/unverifiable origin',
+  );
+  assert(
+    /incomplete/.test(advText),
+    'agent/adversarial.md must expose an incomplete verdict for unverifiable material risk',
+  );
+  return 'adversarial is statically read-only and non-recursive';
+});
+
+check('adversarial full-mode trigger is concrete, not external-facing alone', () => {
+  // The change tightens full-mode escalation. An external-facing
+  // artifact alone must not trigger `full`; only an explicit user
+  // request or a concrete documented risk signal does. The
+  // active review and QA agent prompts must reflect that.
+  for (const file of ['agent/adversarial.md', 'agent/qa.md']) {
+    const text = readFileSync(join(repoRoot, file), 'utf8');
+    assert(
+      /external-facing artifact alone SHALL NOT trigger[\s\S]{0,40}`full`/i.test(text),
+      `${file} must state that an external-facing artifact alone does not trigger full mode`,
+    );
+    assert(
+      /security change[\s\S]{0,80}schema or data migration[\s\S]{0,80}public compatibility change[\s\S]{0,80}open incident/.test(text),
+      `${file} must enumerate the concrete risk signals (security, schema/data migration, public compatibility, open incident)`,
+    );
+    // Legacy wording that tied full mode to "external-facing artifact"
+    // without the "alone" qualifier is now a defect.
+    assert(
+      !/\(security change, schema migration, external-facing artifact, open incident\)/.test(text),
+      `${file} still uses the legacy external-facing-only full-mode trigger`,
+    );
+  }
+  return 'adversarial and qa full-mode triggers are concrete and exclude external-facing-only';
+});
+
+check('refactor compatibility audit uses the shared verdict and re-review contract', () => {
+  // The change aligns the refactor compatibility audit with the
+  // shared review closure contract: introduced BLOCKER/MAJOR findings
+  // must be resolved before done, pre-existing debt is deferred, and
+  // the verdict list includes the new pass-with-blocking-findings and
+  // incomplete states.
+  const refactorText = readFileSync(join(repoRoot, 'agent', 'refactor.md'), 'utf8');
+  assert(
+    /in\s+`targeted`\s+mode/i.test(refactorText),
+    'agent/refactor.md must dispatch adversarial in targeted mode for the compatibility audit',
+  );
+  assert(
+    /origin[\s\S]{0,200}introduced[\s\S]{0,80}pre-existing[\s\S]{0,80}unverifiable/i.test(refactorText),
+    'agent/refactor.md must label audit findings with introduced/pre-existing/unverifiable origin',
+  );
+  assert(
+    /`pass-with-blocking-findings`|pass-with-blocking-findings/.test(refactorText),
+    'agent/refactor.md must include the pass-with-blocking-findings verdict in its report format',
+  );
+  assert(
+    /`incomplete`/.test(refactorText) || /`incomplete`\)/.test(refactorText),
+    'agent/refactor.md must include the incomplete verdict in its report format',
+  );
+  return 'refactor compatibility audit aligns with the shared contract';
+});
+
+check('build and routing document the risk-proportionate adversarial dispatch', () => {
+  // The coordinator decision must be deterministic from documented
+  // risk classes. Both the routing matrix and the build agent must
+  // carry the omit/targeted/required matrix and forbid re-dispatch
+  // for cosmetic concerns.
+  const buildText = readFileSync(join(repoRoot, 'agent', 'build.md'), 'utf8');
+  const routingText = readFileSync(join(repoRoot, 'agent', 'routing.md'), 'utf8');
+  assert(
+    /\*\*Omit\*\*/.test(buildText) &&
+      /\*\*Dispatch once\*\*/.test(buildText) &&
+      /\*\*(Required|Require)\*\*/.test(buildText),
+    'agent/build.md must enumerate the Omit/Dispatch once/Required adversarial decision',
+  );
+
+  assert(
+    /one focused re-review/.test(buildText),
+    'agent/build.md must allow at most one focused re-review after blocking fixes',
+  );
+  assert(
+    /\| Change profile \| Adversarial dispatch \|/.test(routingText),
+    'agent/routing.md must include the risk-proportionate dispatch table',
+  );
+  assert(
+    /SHALL NOT re-dispatch `adversarial` for cosmetic/.test(routingText),
+    'agent/routing.md must forbid cosmetic re-dispatches',
+  );
+  return 'build and routing document the risk-proportionate dispatch contract';
+});
+
+check('incomplete adversarial verdicts continue to a PR-ready handoff without claiming approval', () => {
+  // The coordinate-agents-pr-readiness change makes the PR the
+  // boundary between autonomous agent work and human review. An
+  // `incomplete` verdict carries the unverified risk into the
+  // handoff; the handoff announces the PR is ready for human review
+  // and does not claim approval or sign-off. The routing matrix,
+  // the build coordinator, and the adversarial prompt must reflect
+  // that contract.
+  const buildText = readFileSync(join(repoRoot, 'agent', 'build.md'), 'utf8');
+  const routingText = readFileSync(join(repoRoot, 'agent', 'routing.md'), 'utf8');
+  const advText = readFileSync(join(repoRoot, 'agent', 'adversarial.md'), 'utf8');
+
+  assert(
+    /PR-ready handoff/.test(routingText) &&
+      /boundary between autonomous agent work and human review/i.test(routingText),
+    'agent/routing.md must declare the PR-ready handoff as the human review boundary',
+  );
+  assert(
+    /incomplete[\s\S]{0,400}PR-ready handoff/i.test(routingText),
+    'agent/routing.md must route an incomplete verdict into the PR-ready handoff, not a pre-PR operator decision',
+  );
+  assert(
+    /SHALL NOT[\s\S]{0,200}claim[\s\S]{0,80}approved/.test(routingText) ||
+      /without claiming the[\s\S]{0,40}PR was approved/.test(routingText),
+    'agent/routing.md must forbid the handoff from claiming the PR was approved',
+  );
+
+  assert(
+    /PR-ready handoff/.test(buildText) &&
+      /SHALL NOT claim the PR was approved/.test(buildText),
+    'agent/build.md must require the handoff to announce the PR is ready without claiming approval',
+  );
+  assert(
+    /incomplete[\s\S]{0,400}PR-ready handoff/i.test(buildText) ||
+      /SHALL NOT treat an `incomplete` verdict as a stop/i.test(buildText),
+    'agent/build.md must continue the handoff on an incomplete verdict instead of pausing for a pre-PR human decision',
+  );
+
+  assert(
+    /`incomplete`[\s\S]{0,500}PR-ready handoff/i.test(advText) ||
+      /PR-ready handoff for human review/i.test(advText),
+    'agent/adversarial.md must describe how an incomplete verdict feeds the PR-ready handoff',
+  );
+  assert(
+    !/incomplete[\s\S]{0,200}required\s+operator\s+decision/i.test(advText),
+    'agent/adversarial.md must not require a pre-PR operator decision in the incomplete verdict',
+  );
+
+  return 'incomplete verdicts continue to the PR-ready handoff without claiming approval';
+});
+
 check('only approved decision agents may dispatch the triage subagent', () => {
   // `opsx-propose` is a command that runs in the default agent (build)
   // and therefore inherits build's dispatch rights. The harness encodes
   // the explicit allow-list named in
   // `openspec/specs/agent-routing/spec.md` and
   // `openspec/specs/triage-decision-agent/spec.md`.
+  //
+  // `adversarial` is on the allow-list because the original routing
+  // matrix treats it as a decision-tier agent, but the
+  // optimize-adversarial-review-gates change made the reviewer
+  // read-only and explicitly forbids nested specialist dispatch. The
+  // reviewer therefore declares `task: deny` as a deliberate
+  // departure from the broader decision-tier allow-list.
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
   const allowed = ['build', 'plan', 'adversarial', 'architect', 'orchestrator', 'refactor'];
+  const nonDispatchingDecision = new Set(['adversarial']);
   const offenders = [];
   for (const [agent, body] of Object.entries(cfg.agent ?? {})) {
     const perms = body?.permission || {};
     const hasTaskAllow = perms.task === 'allow';
     const hasExplicitDeny = perms.task === 'deny';
     if (allowed.includes(agent)) {
-      if (!hasTaskAllow) offenders.push(`${agent}: missing task: allow`);
+      if (nonDispatchingDecision.has(agent)) {
+        if (!hasExplicitDeny) {
+          offenders.push(`${agent}: expected task: deny (read-only, no nested dispatch)`);
+        }
+      } else if (!hasTaskAllow) {
+        offenders.push(`${agent}: missing task: allow`);
+      }
     } else if (hasTaskAllow && !hasExplicitDeny) {
       offenders.push(`${agent}: unexpected task: allow (only ${allowed.join(', ')} may dispatch triage)`);
     }
   }
   assert(offenders.length === 0, offenders.join('; '));
-  return `${allowed.length} allow / ${Object.keys(cfg.agent ?? {}).length - allowed.length} deny`;
+  return `${allowed.length} decision agents (${nonDispatchingDecision.size} read-only, ${allowed.length - nonDispatchingDecision.size} dispatching)`;
 });
 
 check('opsx-propose command does not use subtask (inherits default agent)', () => {

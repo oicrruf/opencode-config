@@ -182,23 +182,38 @@ and return a structured error that names the offending call.
   dispatched
 
 ### Requirement: Audit roles expose targeted and full modes
-
 The `qa`, `adversarial`, and `cotizador` agents SHALL each support a
 `mode` parameter with values `targeted` (default) and `full`. In `targeted`
-mode the agent runs the minimal verification or audit required for the
-declared scope; in `full` mode the agent expands surface to lint, types,
-tests, coverage, accessibility, security, performance, and Playwright crawl.
+mode the agent runs only the minimal verification or audit required for
+the declared scope. In `full` mode the agent expands surface to lint,
+types, tests, coverage, accessibility, security, performance, and
+Playwright crawl where applicable.
 
-The system SHALL require an explicit user request OR a documented risk
-signal (security change, schema migration, external-facing artifact, or
-open incident) before switching an audit role to `full`.
+The system SHALL require an explicit user request or a concrete
+documented risk signal before switching an audit role to `full`. A
+concrete risk signal is a security change, a schema or data migration,
+a public compatibility change, or an open incident; an external-facing
+artifact alone SHALL NOT trigger `full` mode.
 
 #### Scenario: adversarial stays targeted unless asked
 
 - **WHEN** the user requests "revisa estos cambios" without specifying an
-  audit depth
+  audit depth and no concrete full-review risk signal is documented
 - **THEN** the `adversarial` agent SHALL default to `targeted` mode and SHALL
-  scan only the axes directly relevant to the changed files
+  scan only the final diff, directly affected dependencies, and axes
+  relevant to the changed files
+
+#### Scenario: external-facing artifact alone remains targeted
+
+- **WHEN** the changed output is external-facing but has no documented
+  security, schema, compatibility, or incident risk and the user did not
+  request a full review
+- **THEN** the audit role SHALL remain in `targeted` mode
+
+#### Scenario: documented security change upgrades to full
+
+- **WHEN** the review scope includes a documented security change
+- **THEN** the audit role SHALL run in `full` mode
 
 #### Scenario: cotizador upgrades to full on confirmed scope
 
@@ -374,3 +389,98 @@ decision the implementation is held to.
 - **THEN** the command SHALL run on `openai/gpt-5.6-terra` and the
   proposal SHALL be generated on Terra, not on the invoking agent's
   cheaper model
+
+### Requirement: Adversarial review dispatch is risk-proportionate
+
+The system SHALL dispatch `adversarial` at most once against the final diff
+of a completed bounded change unless a prior review returned blocking
+findings that were fixed. The system SHALL NOT automatically dispatch
+`adversarial` for isolated mechanical, documentation, formatting, or
+low-risk configuration changes that have no security, data, public-interface,
+compatibility, or executable-logic impact. The system SHALL require an
+adversarial review before completion when the change affects authorization,
+authentication, secrets, untrusted-input handling, schema or data migration,
+destructive data handling, public API or compatibility behavior, or an active
+incident.
+
+#### Scenario: Low-risk mechanical change completes without adversarial review
+
+- **WHEN** a completed change is isolated, mechanical, and has no defined
+  high-risk impact
+- **THEN** the coordinator SHALL rely on task-relevant verification and
+  SHALL NOT automatically dispatch `adversarial`
+
+#### Scenario: Bounded logic change receives one final targeted review
+
+- **WHEN** a completed bounded change modifies executable logic without a
+  full-review trigger
+- **THEN** the coordinator SHALL dispatch `adversarial` once in `targeted`
+  mode against the final diff and its directly affected dependencies
+
+#### Scenario: High-risk change requires adversarial review
+
+- **WHEN** a completed change affects authorization, untrusted-input
+  handling, a schema migration, destructive data handling, public
+  compatibility behavior, secrets, or an active incident
+- **THEN** the coordinator SHALL dispatch `adversarial` before declaring
+  the change complete
+
+### Requirement: Targeted adversarial reviews have a bounded closure
+
+In `targeted` mode, `adversarial` SHALL inspect only the final diff,
+directly affected call paths, and axes relevant to the changed behavior.
+It SHALL NOT run a broad repository scan, a full verification suite,
+dependency-wide CVE scan, or browser automation unless the changed diff
+supplies concrete evidence that the check is required. It SHALL label
+findings as introduced by the change, pre-existing debt, or unverifiable,
+and SHALL not block completion on pre-existing debt, `MINOR`, or `NIT`
+findings. The coordinator SHALL permit one focused re-review limited to
+resolved `BLOCKER` or `MAJOR` findings. After that re-review, the reviewer
+SHALL return a final structured verdict or an incomplete verdict that
+identifies any unverified risk and evidence gathered. The coordinator
+SHALL continue agent coordination through the PR-ready handoff rather than
+requiring a separate human approval before that handoff. It SHALL clearly
+include unresolved material risks and unverified items in the handoff so
+the human can assess them during PR review, and SHALL NOT represent them as
+verified or resolved.
+
+#### Scenario: Targeted review excludes irrelevant audit axes
+
+- **WHEN** a targeted review concerns a non-UI change with no dependency or
+  security evidence
+- **THEN** the reviewer SHALL inspect the diff and relevant call paths
+  without running browser automation, a dependency-wide scan, or unrelated
+  full-suite checks
+
+#### Scenario: Pre-existing debt does not reopen the change
+
+- **WHEN** a targeted review identifies a defect that predates the final
+  diff
+- **THEN** the reviewer SHALL report it as pre-existing debt and the
+  coordinator SHALL NOT treat it as a release blocker for the reviewed
+  change
+
+#### Scenario: Blocking fixes receive one focused re-review
+
+- **WHEN** the reviewer reports introduced `BLOCKER` or `MAJOR` findings
+  and the implementing agent supplies fixes
+- **THEN** the coordinator SHALL request at most one focused re-review of
+  those fixes before closing the review
+
+#### Scenario: Targeted review cannot complete within its budget
+
+- **WHEN** the reviewer cannot verify a material risk before its applicable
+  step budget is exhausted
+- **THEN** it SHALL return an incomplete verdict that identifies the
+  unverified risk and evidence gathered, and the coordinator SHALL continue
+  to the PR-ready handoff with that risk explicitly surfaced for human PR
+  review rather than requiring a separate pre-PR operator decision
+
+#### Scenario: Coordinated work reaches PR-ready handoff
+
+- **WHEN** the required implementation and task-relevant verification are
+  complete and the required adversarial review has returned its final
+  verdict
+- **THEN** the coordinating agent SHALL announce that the PR is ready for
+  human review, summarize verification and findings, and identify any
+  unresolved risks without claiming the PR was approved or merged

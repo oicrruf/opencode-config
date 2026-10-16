@@ -85,14 +85,64 @@ a site without an explicit quoting intent, SHALL NOT be classified as
 `audit` — it is `spec-required` implementation work (or `adversarial`/
 `qa` when the ask is review).
 
+## Adversarial dispatch policy
+
+The coordinator (typically `build`, or `refactor` for its compatibility
+gate) decides whether to dispatch `adversarial` after task-relevant
+verification has run against the final diff. The dispatch is determined
+by a documented risk class, not by review convenience:
+
+| Change profile | Adversarial dispatch |
+|----------------|----------------------|
+| Isolated mechanical, documentation, formatting, or low-risk config change with no security, data, public-interface, compatibility, or executable-logic impact | **Omit** — rely on task-relevant verification |
+| Bounded multi-file change that modifies executable logic but has no full-review trigger | **One final targeted review** against the final diff and directly affected dependencies |
+| Change affecting authorization, authentication, secrets, untrusted-input handling, schema or data migration, destructive data handling, public API or compatibility behavior, or an active incident | **Required** before the change is declared complete |
+
+When the coordinator dispatches `adversarial` it does so at most once
+against the final diff unless the prior review returned introduced
+`BLOCKER` or `MAJOR` findings, in which case a single focused
+re-review of those findings is allowed. After the focused re-review the
+reviewer returns a final verdict or an incomplete verdict that names
+the unverified risk and the evidence gathered. The coordinator SHALL
+NOT re-dispatch `adversarial` for cosmetic or nits-level concerns;
+those belong in a follow-up change.
+
+### PR-ready handoff
+
+The boundary between autonomous agent work and human review is the
+PR-ready handoff. Once the required implementation, task-relevant
+verification, and any required `adversarial` review have completed
+(focused re-review included), the coordinator SHALL continue to the
+PR-ready handoff rather than waiting for a separate pre-PR operator
+decision. The handoff SHALL:
+
+- announce that the PR is ready for human review without claiming the
+  PR was approved, merged, or signed off by anyone other than the
+  named reviewers;
+- summarize the verification actually run, the review verdict, and
+  any follow-ups (pre-existing debt, `MINOR`/`NIT` findings, and any
+  `incomplete` unverified risk);
+- not represent unverified or unresolved material risks as resolved
+  or waived.
+
+`incomplete` is the reviewer's signal that material risk could not be
+verified in the available budget; it is the coordinator's signal to
+carry that risk into the PR-ready handoff explicitly, not to pause
+for a separate pre-PR human decision. The coordinator SHALL NOT
+block the handoff on a `BLOCKER` introduced by the final diff;
+introduced `BLOCKER`s are resolved (with a focused re-review) before
+the handoff.
+
 ## Audit modes
 
 `qa`, `adversarial`, and `cotizador` each accept a `mode` parameter:
 `targeted` (default) runs the minimum checks required for the declared
 scope; `full` runs the full check set. The dispatcher upgrades to `full`
-only when the user has explicitly requested it OR a documented risk
-signal is present (security change, schema migration, external-facing
-artifact, or open incident).
+only when the user has explicitly requested it OR a concrete documented
+risk signal is present. A concrete risk signal is a security change, a
+schema or data migration, a public compatibility change, or an open
+incident. An external-facing artifact alone SHALL NOT trigger `full`
+mode.
 
 ## Dispatch contract
 
