@@ -49,7 +49,6 @@ The system SHALL set `compaction.auto` to `true` and `compaction.prune` to
   2000 tokens of working room
 
 ### Requirement: Each agent declares a step budget
-
 The system SHALL set an explicit `steps` value for every agent defined in
 `opencode.jsonc`. The default budget per class is:
 
@@ -62,11 +61,15 @@ The system SHALL set an explicit `steps` value for every agent defined in
 
 OpenCode accepts exactly one `steps` value per agent, so an agent with
 `targeted` / `full` modes SHALL declare the budget of its **highest**
-mode. `steps` is a ceiling, not a quota: a `targeted` run that completes
-early stops early and does not consume the remaining iterations.
+mode. `steps` is a ceiling, not a quota: a targeted run SHALL stop when
+it has completed its declared bounded scope and SHALL NOT consume
+remaining iterations searching for unrelated findings.
 
 When a session reaches its step limit the agent SHALL emit a structured
-completion summary instead of looping.
+completion summary instead of looping. A targeted `adversarial` summary
+that is incomplete SHALL identify the final diff or scope examined,
+checks completed, material risk not verified, and the operator decision
+or next bounded check required.
 
 #### Scenario: explore stops at its budget
 
@@ -74,6 +77,20 @@ completion summary instead of looping.
   iterations
 - **THEN** it SHALL return a summary listing what was found, what was not,
   and the next recommended action
+
+#### Scenario: targeted adversarial review stops when scope is complete
+
+- **WHEN** `adversarial` has reviewed the final diff and directly affected
+  dependencies required by its targeted scope
+- **THEN** it SHALL return its verdict without spending remaining step
+  budget on unrelated audit axes
+
+#### Scenario: targeted adversarial review reaches its budget
+
+- **WHEN** `adversarial` reaches its step budget before it can verify a
+  material risk in targeted mode
+- **THEN** it SHALL return the required structured incomplete summary and
+  SHALL NOT continue by expanding to unrelated checks
 
 ### Requirement: Operational metrics are observable
 

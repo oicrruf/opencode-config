@@ -55,7 +55,7 @@
       "permission": {
         "edit": "deny",
         "bash": "deny",
-        "task": "allow",
+        "task": "deny",
         "codegraph_*": "allow",
         "context7_*": "allow",
         "playwright_*": "allow"

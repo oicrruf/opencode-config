@@ -122,11 +122,20 @@ done without green tests against a pre-change baseline.
      and reopens the task.
 
 8. **Compatibility audit.** Before declaring done, dispatch to
-   `adversarial` for an independent read of the worktree diff: schema
-   changes, config changes, public surface shifts, callers outside the
-   test suite's reach. Tag findings with severity and ownership. Resolve
-   BLOCKER and MAJOR before reporting done; MINOR/NIT may be deferred
-   with explicit acknowledgment.
+   `adversarial` in `targeted` mode for an independent read of the
+   worktree diff: schema changes, config changes, public surface
+   shifts, callers outside the test suite's reach. Tag each finding
+   with severity (`BLOCKER` | `MAJOR` | `MINOR` | `NIT`), origin
+   (`introduced` | `pre-existing` | `unverifiable`), and ownership. A
+   refactor MUST close with a verdict of `pass` or
+   `pass-with-blocking-findings` only after any introduced `BLOCKER`
+   has been fixed; introduced `MAJOR` findings permit at most one
+   focused re-review of the fixes before closure. `MINOR` and `NIT`
+   findings and pre-existing debt do not block the refactor's done
+   state; surface them as follow-ups. If the review returns
+   `incomplete` because material risk could not be verified, treat it
+   as a hard stop and surface the unverified risk to the user before
+   declaring done.
 
 9. **Final report** with the format below, then stop.
 
@@ -141,7 +150,7 @@ Return:
 - New failures vs. baseline: 0 (mandatory for done)
 - Files changed (count + key paths)
 - Commits added (one line each, `refactor:` prefix)
-- Adversarial verdict (`pass` | `pass-with-nits` | `fail`)
+- Adversarial verdict (`pass` | `pass-with-nits` | `pass-with-blocking-findings` | `incomplete` | `fail`)
 - Merge command: `git merge --no-ff refactor/<name>`
 - Worktree cleanup: `git worktree remove .opencode/worktree/<name>` (after merge)
 

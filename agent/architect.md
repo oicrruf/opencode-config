@@ -157,6 +157,14 @@ The normal coordinated path for `spec-required` work is:
 
 `plan/OpenSpec -> build -> local specialists -> qa -> adversarial -> archive`
 
+The `adversarial` step is risk-proportionate: low-risk mechanical or
+documentation changes complete after `qa`; bounded logic changes
+receive one final targeted `adversarial` review; defined high-risk
+changes (auth, secrets, untrusted input, schema or data migration,
+destructive data handling, public API or compatibility behavior, or
+active incident) require `adversarial` before archive. See
+`agent/routing.md` and `agent/build.md` for the dispatch matrix.
+
 Use `/opsx-explore` for discovery, `/opsx-update` when decisions change,
 `/opsx-sync` when main specs need synchronization, and `/opsx-archive` only
 after implementation and verification are complete.
