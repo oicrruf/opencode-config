@@ -91,7 +91,7 @@ function readFrontmatter(file) {
   return result;
 }
 
-const GROUP_ORDER = ['static', 'routing', 'skills', 'wrappers'];
+const GROUP_ORDER = ['static', 'routing', 'skills', 'sandbox', 'wrappers'];
 
 // ---------------------------------------------------------------------------
 // static
@@ -874,6 +874,115 @@ check('opsx-propose command does not use subtask (inherits default agent)', () =
 });
 
 // ---------------------------------------------------------------------------
+// sandbox
+// ---------------------------------------------------------------------------
+
+group('sandbox');
+
+check('the sandbox tool grants match the intended agents', () => {
+  // The sandbox control is granted to the agents that verify a change.
+  // The audit specialists, the explorers, and the read-only reviewers
+  // must not hold it: their value comes from an independent view of the
+  // change, and a sandbox in their context would blur that
+  // independence.
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const granted = ['build', 'frontend', 'backend'];
+  const denied = ['qa', 'adversarial', 'explore', 'cotizador', 'triage', 'plan', 'doctor'];
+  const families = ['sandbox_*', 'reservation_*'];
+  const offenders = [];
+  for (const agent of granted) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    for (const family of families) {
+      if (perms[family] !== 'allow') {
+        offenders.push(`${agent}: ${family} is ${perms[family] ?? '(unset)'}, expected allow`);
+      }
+    }
+  }
+  for (const agent of denied) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    for (const family of families) {
+      if (perms[family] === 'allow' || perms[family] === 'ask') {
+        offenders.push(`${agent}: ${family} is ${perms[family]}, expected not granted`);
+      }
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${granted.length} agents granted, ${denied.length} agents denied`;
+});
+
+check('the sandbox plugin is present with its entry point', () => {
+  const dir = join(repoRoot, 'plugins', 'sandbox-control');
+  assert(existsSync(dir), 'the sandbox control plugin directory is missing');
+  assert(existsSync(join(dir, 'index.js')), 'the sandbox control plugin has no entry point');
+  assert(existsSync(join(dir, 'GUIDE.md')), 'the sandbox control has no operator guide');
+  return 'plugin, entry point, and guide are present';
+});
+
+check('the sandbox argument set asserts the isolation boundary', () => {
+  // The boundary is constructed in one place so it can be asserted
+  // without a Docker engine. The check runs the module directly.
+  const modulePath = join(repoRoot, 'plugins', 'sandbox-control', 'docker-adapter.mjs');
+  const script = `
+    import { buildRunArguments, buildBuildArguments, assertNoForbiddenOptions, FORBIDDEN_OPTIONS }
+      from ${JSON.stringify(modulePath)};
+    const run = buildRunArguments({
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      workId: 'work-1',
+      containerName: 'sandbox-exec-1',
+      networkName: 'sandbox-net-exec-1',
+      ports: [{ container: 8080, host: '127.0.0.1', hostPort: 18080 }],
+    });
+    if (!run.ok) { console.error(run.reason); process.exit(1); }
+    const forbidden = assertNoForbiddenOptions(run.args);
+    if (!forbidden.ok) { console.error(forbidden.found.join(' ')); process.exit(1); }
+    for (const option of FORBIDDEN_OPTIONS) {
+      if (run.args.includes(option)) { console.error('present: ' + option); process.exit(1); }
+    }
+    if (!run.args.includes('--cap-drop')) { console.error('no --cap-drop'); process.exit(1); }
+    if (!run.args.includes('ALL')) { console.error('no capability drop'); process.exit(1); }
+    if (!run.args.includes('--security-opt')) { console.error('no --security-opt'); process.exit(1); }
+    if (!run.args.includes('no-new-privileges')) { console.error('no no-new-privileges'); process.exit(1); }
+    if (!run.args.includes('--cpus') || !run.args.includes('--memory')) { console.error('no limits'); process.exit(1); }
+    const external = buildRunArguments({
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      containerName: 'sandbox-exec-1',
+      networkName: 'sandbox-net-exec-1',
+      ports: [{ container: 8080, host: '0.0.0.0' }],
+    });
+    if (external.ok) { console.error('a non-loopback publication was accepted'); process.exit(1); }
+    const build = buildBuildArguments({
+      captureDir: ${JSON.stringify(join(repoRoot, 'plugins'))},
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      workId: 'work-1',
+    });
+    if (build.ok && !assertNoForbiddenOptions(build.args).ok) { console.error('the build carries a forbidden option'); process.exit(1); }
+    console.log('OK');
+  `;
+  const out = run(process.execPath, ['--input-type=module', '-e', script]);
+  assert(out.includes('OK'), `the sandbox argument set check failed: ${out.trim()}`);
+  return 'no forbidden option, no host network, loopback publications only, limits declared';
+});
+
+check('the sandbox module tests pass without Docker', () => {
+  const dir = join(repoRoot, 'plugins', 'sandbox-control', 'test');
+  for (const file of ['reservation.test.mjs', 'capture.test.mjs', 'lifecycle.test.mjs', 'boundaries.test.mjs']) {
+    assert(existsSync(join(dir, file)), `the sandbox test file ${file} is missing`);
+  }
+  const out = run(process.execPath, [join(dir, 'reservation.test.mjs')]);
+  assert(!/fail [1-9]/.test(out), `the reservation tests failed:\n${out}`);
+  const capture = run(process.execPath, [join(dir, 'capture.test.mjs')]);
+  assert(!/fail [1-9]/.test(capture), `the capture tests failed:\n${capture}`);
+  const lifecycle = run(process.execPath, [join(dir, 'lifecycle.test.mjs')]);
+  assert(!/fail [1-9]/.test(lifecycle), `the lifecycle tests failed:\n${lifecycle}`);
+  const boundaries = run(process.execPath, [join(dir, 'boundaries.test.mjs')]);
+  assert(!/fail [1-9]/.test(boundaries), `the boundary tests failed:\n${boundaries}`);
+  return 'the reservation, capture, lifecycle, and boundary tests pass on a host without Docker';
+});
+
+// ---------------------------------------------------------------------------
 // wrappers  (live: exercises a running opencode process)
 // ---------------------------------------------------------------------------
 
@@ -1010,7 +1119,7 @@ if (LIVE) {
 // ---------------------------------------------------------------------------
 
 if (process.argv.includes('--list')) {
-  console.log('Groups: static, routing, skills, wrappers (add --live for runtime tests)');
+  console.log('Groups: static, routing, skills, sandbox, wrappers (add --live for runtime tests)');
   process.exit(0);
 }
 

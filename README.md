@@ -195,8 +195,96 @@ to confirm a healthy install. When the install fails, the line is replaced
 with `install.sh: FAIL — gate <name> failed`.
 ```
 
-## Diagnose and repair (`/doctor`)
+## Runtime verification sandbox
 
+Some changes can only be verified at runtime: a container that does not
+build, a service that does not answer, a page that does not render. The
+sandbox control verifies them from recorded evidence instead of from a
+claim.
+
+The sandbox takes an independent capture of the work under test and runs
+it inside a local Docker engine. The full operator guide is at
+`plugins/sandbox-control/GUIDE.md`.
+
+### Prerequisites
+
+- A local Docker engine on **Linux or WSL2**. The isolation boundary is
+  expressed with Docker's own flags, so there is no equivalent on macOS
+  or on Windows outside WSL2.
+- A project that declares its build in `.opencode/sandbox.json`.
+
+On a host that does not meet the requirements the control reports the
+block. It never installs Docker, never generates a Dockerfile, and never
+infers a build configuration.
+
+### The declared configuration
+
+```json
+{
+  "dockerfile": "Dockerfile",
+  "context": ".",
+  "stage": "test",
+  "ports": [{ "container": 8080, "host": "127.0.0.1", "hostPort": 18080 }],
+  "production": { "allowExternalEgress": false },
+  "testSecrets": [{ "name": "API_TOKEN", "value": "..." }]
+}
+```
+
+`dockerfile`, `context`, and `stage` are required. A declared path that
+leaves the project is refused: the build context is the boundary that
+keeps the host's content out of the image.
+
+### The isolation boundary
+
+Every run happens inside a boundary the control constructs itself: no
+Docker socket, no elevated privileges, no added capabilities, no host
+network, no host namespaces, no mount of the original source, a network
+created for the execution (internal by default), published ports bound
+to the loopback interface only, and declared CPU, memory, and process
+limits.
+
+### The result states
+
+`passed`, `failed`, `blocked`, and `not executed`. **Starting the
+environment does not approve the product**, and the sandbox never claims
+equivalence with production.
+
+### The dependencies
+
+The dependencies the project declares are checked before the quota is
+taken and before any resource is created. A dependency that does not
+answer **blocks the test**: the sandbox never provisions a service, so
+a database, a cache, or an API the test needs is the developer's to
+prepare. The block names the dependency that is missing.
+
+### Where the evidence lands
+
+The report is written to `.opencode/state/sandbox/reports/<execution>.json`
+in the project's state area, outside the environment and outside the
+capture. It is written **before** any resource is removed, so a container
+is never destroyed together with the report that describes it.
+
+### The quota
+
+One local application runs at a time per project, and the sandbox shares
+that quota with the manual application. A second session is refused
+before anything is launched, and the refusal names the work that holds
+it. The owner token is the only way to stop the application; it is
+stored on disk only as a salted verifier.
+
+Closing, cancelling, and recovering an execution all require the token
+that owns its reservation. An actor that knows only the execution
+identity cannot destroy an environment it does not own.
+
+### The limits
+
+The sandbox requires Linux or WSL2, does not provision dependencies
+(a missing service blocks the test), does not support Compose or a
+remote engine, does not return the changes a test made inside the
+container, and never modifies the host's branches, publishes code, or
+opens a pull request.
+
+## Diagnose and repair (`/doctor`)
 The global `doctor` subagent inspects the host, the configuration
 symlinks, the OpenSpec change state, and the declared MCPs, then prints
 a single report with one of four levels per finding: `ok`, `warn`,

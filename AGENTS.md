@@ -58,6 +58,19 @@ validators.
   The `agent-routing` spec (`openspec/specs/agent-routing/spec.md`) is the
   contract for routing decisions; profile edits that change model
   assignments MUST keep the spec aligned.
+- **Runtime verification sandbox.** A change that can only be verified at
+  runtime is verified through the sandbox control
+  (`plugins/sandbox-control/`) instead of on the host. The sandbox takes
+  an independent capture of the work under test, runs it inside a local
+  Docker engine with no host network, no added privileges, no mount of
+  the original source, and loopback-only port publications, and writes
+  the report outside the environment before it removes anything. Two
+  rules bound its use: **one local application per project**, so a
+  second session is refused before anything launches, and **a missing
+  dependency blocks the test** rather than being provisioned by the
+  agent. Starting the environment never approves a product, and the
+  sandbox never modifies the host's branches or publishes code. The
+  operator guide is `plugins/sandbox-control/GUIDE.md`.
 - **Line endings.** The repository declares `* text=auto eol=lf` in
   `.gitattributes` so every shell and runtime file (`*.sh`, `*.ps1`,
   `*.mjs`, `*.js`, `*.ts`, `*.tsx`, `*.cjs`, `*.mts`, `*.cts`) is LF

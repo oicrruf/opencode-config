@@ -79,7 +79,9 @@
         "bash": "ask",
         "task": "allow",
         "codegraph_*": "allow",
-        "context7_*": "allow"
+        "context7_*": "allow",
+        "sandbox_*": "allow",
+        "reservation_*": "allow"
       },
       "model": "ollama-cloud/gpt-oss:20b"
     },
@@ -98,7 +100,9 @@
         "edit": "allow",
         "bash": "ask",
         "codegraph_*": "allow",
-        "playwright_*": "allow"
+        "playwright_*": "allow",
+        "sandbox_*": "allow",
+        "reservation_*": "allow"
       },
       "model": "ollama-cloud/gpt-oss:20b"
     },
@@ -108,7 +112,9 @@
         "edit": "allow",
         "bash": "ask",
         "codegraph_*": "allow",
-        "context7_*": "allow"
+        "context7_*": "allow",
+        "sandbox_*": "allow",
+        "reservation_*": "allow"
       },
       "model": "ollama-cloud/gpt-oss:20b"
     },

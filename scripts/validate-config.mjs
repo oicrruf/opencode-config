@@ -357,6 +357,69 @@ function runStructuralChecks() {
       }
     }
   }
+
+  runSandboxSurfaceChecks();
+}
+
+// The sandbox control is granted to the agents that verify a change.
+// The audit specialists, the explorers, and the read-only reviewers do
+// not receive it: their value comes from an independent view of the
+// change, and a sandbox in their context would blur it.
+//
+// The check reads the template (the source of the rendered config) and
+// the rendered config when it is present, so a grant that drifts in
+// either surface fails the build.
+function runSandboxSurfaceChecks() {
+  const TEMPLATE = join(repoRoot, 'config', 'opencode.template.jsonc');
+  const RENDERED = join(repoRoot, 'opencode.jsonc');
+
+  // The agents that verify a change and therefore need the sandbox.
+  const GRANTED = ['build', 'frontend', 'backend'];
+  // The agents that must never hold it.
+  const DENIED = [
+    'qa',
+    'adversarial',
+    'explore',
+    'cotizador',
+    'triage',
+    'plan',
+    'doctor',
+  ];
+
+  const TOOL_FAMILIES = ['sandbox_*', 'reservation_*'];
+
+  const surfaces = [];
+  if (existsSync(TEMPLATE)) surfaces.push({ file: TEMPLATE, cfg: readJsonc(TEMPLATE) });
+  if (existsSync(RENDERED)) surfaces.push({ file: RENDERED, cfg: readJsonc(RENDERED) });
+
+  for (const { file, cfg } of surfaces) {
+    for (const agent of GRANTED) {
+      const perms = cfg.agent?.[agent]?.permission || {};
+      for (const family of TOOL_FAMILIES) {
+        if (perms[family] !== 'allow') {
+          fail(file, `agent.${agent}: the sandbox control grants '${family}', expected 'allow'`);
+        }
+      }
+    }
+    for (const agent of DENIED) {
+      const perms = cfg.agent?.[agent]?.permission || {};
+      for (const family of TOOL_FAMILIES) {
+        if (perms[family] === 'allow' || perms[family] === 'ask') {
+          fail(file, `agent.${agent}: the sandbox control must not grant '${family}'`);
+        }
+      }
+    }
+  }
+
+  // The plugin directory is present with its entry point, so a grant
+  // never points at a plugin that does not exist.
+  const pluginDir = join(repoRoot, 'plugins', 'sandbox-control');
+  const entryPoint = join(pluginDir, 'index.js');
+  if (!existsSync(pluginDir)) {
+    fail(pluginDir, 'the sandbox control plugin directory is missing');
+  } else if (!existsSync(entryPoint)) {
+    fail(entryPoint, 'the sandbox control plugin has no entry point');
+  }
 }
 
 function runSkillBudgetChecks() {
