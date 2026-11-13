@@ -58,6 +58,17 @@ validators.
   The `agent-routing` spec (`openspec/specs/agent-routing/spec.md`) is the
   contract for routing decisions; profile edits that change model
   assignments MUST keep the spec aligned.
+- **Managed worktrees.** A change that needs an isolated workspace gets
+  it through the managed worktree control (`plugins/worktree-control/`),
+  never through a raw `git worktree add`. The control creates the worktree
+  outside the canonical checkout and records it in the project's inventory.
+  Retirement requires an explicit request with the worktree, branch, base,
+  expected head, and evidence; it is blocked by local changes, unpublished
+  commits, process access, unrecognized ignored files, unsafe paths, or
+  unverifiable checks. Evidence is preserved before removal, the remote
+  branch and published commits are never removed, and age/capacity never
+  retire a worktree. The legacy `.opencode/worktree/` path remains ignored
+  for compatibility only.
 - **Line endings.** The repository declares `* text=auto eol=lf` in
   `.gitattributes` so every shell and runtime file (`*.sh`, `*.ps1`,
   `*.mjs`, `*.js`, `*.ts`, `*.tsx`, `*.cjs`, `*.mts`, `*.cts`) is LF

@@ -79,7 +79,8 @@
         "bash": "ask",
         "task": "allow",
         "codegraph_*": "allow",
-        "context7_*": "allow"
+        "context7_*": "allow",
+        "worktree_*": "allow"
       },
       "model": "ollama-cloud/gpt-oss:20b"
     },
@@ -147,7 +148,8 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow",
-        "serena_*": "allow"
+        "serena_*": "allow",
+        "worktree_*": "allow"
       },
       "model": "openai/gpt-5.6-terra"
     },

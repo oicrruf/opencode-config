@@ -85,6 +85,42 @@ default, PDF when explicitly requested). Never generate multi-file
 workspaces, READMEs, or state-tracking files for the cotización — that is
 project management, not the agent's job.
 
+## Managed worktrees
+
+A change that needs an isolated workspace goes through the managed
+worktree control, not through a raw `git worktree add`.
+
+**Creating.** Call `worktree_create` with the work identifier and the
+branch. The control creates the worktree outside the canonical checkout
+and records it in the project's inventory. A repeated request for the
+same work returns the existing worktree instead of creating a second
+one.
+
+**Retiring.** A retirement is an explicit request, never a side effect
+of a creation, an inspection, or a capacity check. The sequence is:
+
+1. **Capture the identity** of the worktree: its directory, its branch,
+   the base it integrates into, and the expected head.
+2. **Preserve the evidence.** The review and verification reports are
+   copied outside the worktree, with a manifest that ties them to the
+   branch and the reviewed commit. The control does this as part of the
+   retirement, and a failure keeps the worktree.
+3. **Request the retirement** with that identity through
+   `worktree_retire`.
+4. **Report three results separately**: the retirement itself, the
+   removal of the local branch, and the preserved remote. A branch that
+   could not be removed is reported as pending, not as a failure of the
+   whole operation.
+
+The control refuses a retirement when the worktree holds local
+changes, unpublished commits, a process with access, unrecognized
+ignored files, or an unsafe path. It never removes the remote branch
+and never touches the published commits.
+
+**Age and capacity never retire a worktree.** `worktree_candidates`
+orders the list by age and reports what would block each entry;
+listing retires nothing.
+
 ## Code intelligence
 
 Use CodeGraph as the daily first choice for locating symbols, reading

@@ -383,6 +383,7 @@ link "$repo_dir/tui.jsonc" "$config_dir/tui.jsonc"
 link "$repo_dir/herdr-tui-session.js" "$config_dir/herdr-tui-session.js"
 link "$repo_dir/quota-tui.tsx" "$config_dir/quota-tui.tsx"
 link "$repo_dir/plugins/herdr-agent-state.js" "$config_dir/plugins/herdr-agent-state.js"
+link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"
 
 if [ -L "$config_dir/plugins/autonomy.js" ]; then
   rm "$config_dir/plugins/autonomy.js"

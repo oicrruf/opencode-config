@@ -100,7 +100,10 @@ not count.
 A retirement request names the worktree, its branch, the base it
 integrates into, the expected head, and the evidence that the work was
 integrated. The control verifies that identity against the repository
-before touching anything, and refuses a request that is missing any of it.
+before touching anything: the branch and head must match the actual
+worktree, and the head must be integrated into the declared base with the
+published state verified. The base must be a distinct branch from the
+retiring branch. It refuses missing or mismatched identity.
 
 **Alternative considered:** Let the control infer the identity from the
 current session. Rejected because the session's worktree is not
@@ -122,8 +125,9 @@ one that matters.
 
 The recognized verification and review reports are copied to a location
 outside the worktree, under a directory named after the worktree and the
-date, with a manifest that records the worktree, the branch, the reviewed
-commit, and the copied files. A file the evidence policy does not
+date, with an exclusive destination that is never reused or overwritten,
+and a manifest that records the worktree, the branch, the reviewed commit,
+and the copied files. A file the evidence policy does not
 recognize is not copied, and a file that looks like a credential is not
 copied.
 
@@ -186,6 +190,17 @@ The control resolves the project root from the session location. Outside a
 Git repository it reports that the control is unavailable and creates
 nothing. Because the plugin is installed globally, that inertness is what
 keeps it harmless in the many directories on a host that are not projects.
+
+State and evidence directory components are checked without following
+symbolic links. A project-controlled link must not redirect the globally
+installed control's inventory, lock, or evidence writes.
+
+### 12. The installer links the plugin used by the granted tools
+
+The installer makes the complete worktree-control plugin available in the
+installed OpenCode plugin directory. Granting `worktree_*` tools without
+loading their implementation would leave the agents with unusable tools, so
+the installed layout is checked by the validator and acceptance harness.
 
 ## Risks / Trade-offs
 
