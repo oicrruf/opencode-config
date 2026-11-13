@@ -195,6 +195,67 @@ to confirm a healthy install. When the install fails, the line is replaced
 with `install.sh: FAIL — gate <name> failed`.
 ```
 
+## Managed worktrees
+
+A change that needs an isolated workspace gets it through the managed
+worktree control, not through a raw `git worktree add`. The control
+creates worktrees outside the canonical checkout, where OpenCode manages
+them, and records them in the project's inventory.
+
+### Creating and inventory
+
+Call `worktree_create` with a work identifier and branch. A repeated
+request for the same work returns the existing worktree instead of
+creating a second one, and never resets it. `worktree_list` reports each
+worktree's directory, branch, and state. The inventory reconciles records
+with actual worktrees: missing directories are reported as *missing* and
+unrecorded worktrees are reported rather than silently dropped.
+
+### Capacity
+
+`worktree_capacity` reports measured available space and the number of
+worktrees. It announces no maximum, remaining budget, or threshold. If
+space cannot be measured, it reports that and continues; only exactly
+zero available bytes blocks creation.
+
+### Retirement
+
+Retirement is an **explicit request**. It never happens as a side effect
+of creation, inspection, or a capacity check; **age and capacity never
+retire a worktree**. `worktree_candidates` orders candidates by age,
+reports blockers, and never retires anything.
+
+The request names the worktree, its branch, a distinct integration base,
+the expected head, and evidence. The control verifies the request against
+the actual linked worktree and published base before preserving evidence
+or removing anything. It refuses missing or mismatched identity.
+
+Retirement is blocked by local changes, unpublished commits, process
+access, unrecognized ignored files, unsafe worktree/state paths, or a
+check that cannot be performed. The worktree is kept and the blocking
+condition is reported.
+
+### Evidence, branches, and lock
+
+Recognized verification and review reports are copied outside the
+worktree to `.opencode/state/worktrees/evidence/`, under an exclusive
+directory with a manifest tying the files to the worktree, branch, and
+reviewed commit. Existing evidence is never overwritten; secrets and
+unrecognized files are not copied. If preservation fails, the worktree
+is kept.
+
+The local branch is removed only after the published state is verified,
+and only when it is not a symbolic reference or checked out elsewhere.
+Removal is never forced; a branch that cannot be removed is reported as
+pending separately from the completed retirement. The remote branch and
+published commits are never removed.
+
+Mutating operations use a project lock. A concurrent operation is
+refused with the lock owner reported; an unverifiable lock is preserved.
+The installer links the plugin entry point into the global OpenCode
+plugins directory. The legacy `.opencode/worktree/` path remains ignored
+for compatibility only.
+
 ## Diagnose and repair (`/doctor`)
 
 The global `doctor` subagent inspects the host, the configuration

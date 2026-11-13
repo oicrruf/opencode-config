@@ -3,9 +3,10 @@ description: Refactor specialist. Behavior-preserving structural edits inside a 
 mode: subagent
 steps: 100
 # Broadened permission: this agent runs a long refactor in an isolated
-# worktree (`.opencode/worktree/<name>/`). It needs shell, edit, and
-# external-directory access inside that worktree to commit atomically and
-# capture baselines. It must never touch anything outside the worktree
+# worktree, created through the managed worktree control outside the
+# canonical checkout. It needs shell, edit, and external-directory
+# access inside that worktree to commit atomically and capture
+# baselines. It must never touch anything outside the worktree
 # without surfacing a blocker.
 permission:
   edit: allow
@@ -47,9 +48,11 @@ done without green tests against a pre-change baseline.
    blocker — do not start a refactor on a red suite without an explicit
    decision from the user.
 
-4. **Worktree is mandatory.** All code edits happen inside
-   `.opencode/worktree/<refactor-name>/` on branch `refactor/<refactor-name>`,
-   never on the main checkout. The OpenSpec change itself stays in the
+4. **Worktree is mandatory.** All code edits happen inside a managed
+   worktree on branch `refactor/<refactor-name>`, never on the main
+   checkout. The worktree is created through the `worktree_create`
+   tool, which places it outside the canonical checkout and records it
+   in the project's inventory. The OpenSpec change itself stays in the
    main repo and is independent of the worktree.
 
 ## Workflow
@@ -89,14 +92,23 @@ done without green tests against a pre-change baseline.
    If the project has multiple suites (unit, integration, e2e), capture
    each that applies.
 
-6. **Create the worktree** from the main checkout:
-   ```bash
-   git worktree add .opencode/worktree/<refactor-name> \
-     -b refactor/<refactor-name>
-   ```
-   If the directory or branch already exists, stop and ask whether to
-   reuse, recreate, or abort. All subsequent file edits, commits, and
-   test runs happen inside the worktree path.
+6. **Create the worktree through the managed control.** Call the
+   `worktree_create` tool with the work identifier
+   (`<refactor-name>`) and the branch (`refactor/<refactor-name>`).
+   The control creates the worktree outside the canonical checkout,
+   where OpenCode manages it, and records it in the project's
+   inventory.
+
+   Do NOT create the worktree with a raw Git command. A worktree
+   inside the checkout pollutes the working tree, appears in the
+   `git status` of the canonical checkout, and can be committed by
+   accident; the managed control is the only creation path.
+
+   A repeated request for the same work returns the existing worktree
+   instead of creating a second one, and it never resets it. If the
+   control reports that the branch already exists, stop and ask whether
+   to reuse, recreate, or abort. All subsequent file edits, commits,
+   and test runs happen inside the directory the control returned.
 
 7. **Apply the refactor, one task at a time**, working inside the worktree:
    - Follow the `refactoring` catalog (extract, rename, move, change
@@ -144,7 +156,8 @@ done without green tests against a pre-change baseline.
 Return:
 - Refactor name and objective (one sentence each)
 - OpenSpec change path (`openspec/changes/<name>/`)
-- Worktree path (`.opencode/worktree/<name>/`) and branch (`refactor/<name>`)
+- Worktree path (the directory the managed control returned) and
+  branch (`refactor/<name>`)
 - Baseline test summary (command, pass/fail/skip counts, time)
 - Final test summary (same command, pass/fail/skip counts, time)
 - New failures vs. baseline: 0 (mandatory for done)
@@ -152,7 +165,12 @@ Return:
 - Commits added (one line each, `refactor:` prefix)
 - Adversarial verdict (`pass` | `pass-with-nits` | `pass-with-blocking-findings` | `incomplete` | `fail`)
 - Merge command: `git merge --no-ff refactor/<name>`
-- Worktree cleanup: `git worktree remove .opencode/worktree/<name>` (after merge)
+- Worktree cleanup: after the merge, call `worktree_retire` with the
+  worktree directory, its branch, the base it integrates into, the
+  expected head, and the evidence that the work was integrated. The
+  control preserves the review and verification evidence outside the
+  worktree before it removes anything, and it reports the retirement,
+  the branch removal, and the preserved remote separately.
 
 ## Skills to consult
 
