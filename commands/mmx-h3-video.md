@@ -1,7 +1,7 @@
 ---
 description: Generate, monitor, and download MiniMax-H3 videos through the mmx CLI (hidden skill, user-invoked)
 agent: build
-model: ollama-cloud/gpt-oss:20b
+model: openai/gpt-5.6-luna
 ---
 
 The following is the canonical `mmx-h3-video` skill, injected from its

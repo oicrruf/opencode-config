@@ -45,6 +45,15 @@ atomically replaces the installed `~/.config/opencode/opencode.jsonc`. The
 selected profile persists; ordinary `opencode` invocations need no profile
 flag or environment variable.
 
+### OpenAI model access
+
+All root, agent, and command model assignments use OpenAI. OpenCode supports
+connecting with ChatGPT Plus or Pro OAuth; model use counts against the plan's
+allowance. This is separate from OpenAI API billing, and the repository does
+not configure or store an API key. See the [OpenCode provider
+docs](https://opencode.ai/docs/providers) and [OpenAI billing
+docs](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform).
+
 ```bash
 ./install.sh                       # default: the manifest's defaultProfile (currently personal)
 ./install.sh --profile personal    # explicit selection
@@ -475,10 +484,10 @@ subagent depth, and a tool surface. The full matrix lives in
 
 | Class          | Default model                       | Depth | Browser |
 |----------------|-------------------------------------|-------|---------|
-| `small`        | `minimax/MiniMax-M2.7-highspeed`    | 0     | deny    |
-| `medium`       | `minimax/MiniMax-M3`                | 1     | deny    |
-| `spec-required`| Terra (plan) + M3 (implement)       | 1     | only with risk |
-| `audit`        | Terra                               | 1     | required |
+| `small`        | `openai/gpt-5.6-luna` | 0 | deny |
+| `medium`       | `openai/gpt-5.6-luna` | 1 | deny |
+| `spec-required`| `openai/gpt-5.6-terra` (plan) + `openai/gpt-6.1-sol` (implement) | 1 | only with risk |
+| `audit`        | `openai/gpt-5.6-terra` | 1 | required |
 
 The `audit` class is selected **only** for an explicit `@cotizador` mention or
 an explicit request to quote (cotizar/presupuestar) the development of an
@@ -528,7 +537,7 @@ no MCP entry.
 
 Only `build`, `plan`, and `adversarial` dispatch the `triage` subagent.
 Every other agent in the matrix denies delegation and editing. The
-agent runs on the value tier (`ollama-cloud/gpt-oss:20b`) and refuses
+agent runs on the lightweight tier (`openai/gpt-5.6-luna`) and refuses
 to nest additional specialists. See the `mcp-profiles` and
 `agent-routing` specs for the exact boundaries.
 

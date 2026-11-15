@@ -188,7 +188,7 @@ try {
     let authenticated;
     let liveModel;
     await check('authenticated sequential read observation',async()=>{
-      const f=fixture();const model=process.env.CONTINUITY_LIVE_MODEL || 'ollama-cloud/gpt-oss:20b';
+      const f=fixture();const model=process.env.CONTINUITY_LIVE_MODEL || 'openai/gpt-6.1-sol';
       const provider=model.split('/')[0];
       const authPath=join(process.env.XDG_DATA_HOME || join(homedir(),'.local/share'),'opencode/auth.json');
       assert(existsSync(authPath),'existing OpenCode auth store is unavailable');

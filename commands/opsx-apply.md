@@ -1,6 +1,6 @@
 ---
 description: "Implement tasks from an OpenSpec change (Experimental)"
-model: minimax/MiniMax-M3
+model: openai/gpt-6.1-sol
 ---
 
 Implement tasks from an OpenSpec change.

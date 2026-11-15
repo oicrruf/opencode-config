@@ -14,149 +14,129 @@ The system SHALL classify each implementation request into exactly one of
 SHALL route it according to the matrix below. A request that does not match
 any class defaults to `medium`.
 
-| Class        | Default model            | Subagent depth | Specialist count | Browser MCP |
-|--------------|--------------------------|----------------|------------------|-------------|
-| `small`      | `ollama-cloud/gpt-oss:20b` | 0              | 0                | deny        |
-| `medium`     | `ollama-cloud/gpt-oss:20b` | 1              | 0–1              | deny        |
-| `spec-required` | `openai/gpt-5.6-terra` for planning, `minimax/MiniMax-M3` for implementation | 1              | 0–2              | only with explicit risk |
-| `audit`      | `openai/gpt-5.6-terra`    | 1              | 0–1              | required    |
+| Class | Default model | Subagent depth | Specialist count | Browser MCP |
+|---|---|---:|---:|---|
+| `small` | `openai/gpt-5.6-luna` | 0 | 0 | deny |
+| `medium` | `openai/gpt-5.6-luna` | 1 | 0–1 | deny |
+| `spec-required` | `openai/gpt-5.6-terra` for planning, `openai/gpt-6.1-sol` for implementation | 1 | 0–2 | only with explicit risk |
+| `audit` | `openai/gpt-5.6-terra` | 1 | 0–1 | required |
 
-The system SHALL classify a request as `audit` **only** when the user
-explicitly @-mentions `@cotizador` OR explicitly requests a quote
-(cotizar/presupuestar) for the development of an application or a
-development effort. A URL on its own, or a request to improve, redesign,
-migrate, optimize, audit, or evaluate a site without explicitly requesting
-a development quote, SHALL NOT be classified as `audit` and SHALL NOT dispatch
+The system SHALL classify a request as `audit` only when the user explicitly
+@-mentions `@cotizador` or explicitly requests a quote for development of an
+application or development effort. A URL alone, or a request to improve,
+redesign, migrate, optimize, audit, or evaluate a site without an explicit
+development quote, SHALL NOT be classified as `audit` and SHALL NOT dispatch
 `cotizador`.
 
-The system SHALL refuse to delegate deeper than the configured `subagent_depth`
-and SHALL surface a clear blocker when a specialist request would exceed it.
+The system SHALL refuse to delegate deeper than the configured
+`subagent_depth` and SHALL surface a clear blocker when a specialist request
+would exceed it.
 
 #### Scenario: small request stays inline
 
-- **WHEN** the user asks for a single-line CSS tweak with no schema, dependency,
+- **WHEN** the user asks for an isolated CSS tweak with no schema, dependency,
   or compatibility impact
-- **THEN** the primary agent SHALL classify the work as `small`, run on
-  `ollama-cloud/gpt-oss:20b`, and SHALL NOT dispatch any subagent or
-  enable browser automation
+- **THEN** the primary agent SHALL classify it as `small`, use
+  `openai/gpt-5.6-luna`, and SHALL NOT dispatch a subagent or enable browser
+  automation
 
 #### Scenario: medium request uses exactly one specialist
 
-- **WHEN** the user asks for a bounded multi-file change with no durable design
+- **WHEN** the user asks for bounded multi-file work with no durable design
   decision
-- **THEN** the primary agent SHALL classify the work as `medium`, run on
-  `ollama-cloud/gpt-oss:20b`, and MAY dispatch at most one specialist with
-  no further nesting
+- **THEN** the primary agent SHALL classify it as `medium`, use
+  `openai/gpt-5.6-luna`, and MAY dispatch at most one specialist with no further
+  nesting
 
 #### Scenario: spec-required uses Terra for the proposal only
 
 - **WHEN** the user asks for a new API or observable behavior change that
   triggers `/opsx-propose`
-- **THEN** the planning step SHALL run on `openai/gpt-5.6-terra` and the
-  implementation step SHALL run on `minimax/MiniMax-M3`, matching the
-  scenario name; the proposal carries the decision weight because it is the
-  contract the implementation is held to
+- **THEN** the planning artifact SHALL be generated on
+  `openai/gpt-5.6-terra` and implementation SHALL use
+  `openai/gpt-6.1-sol`
 
 #### Scenario: a URL alone does not dispatch cotizador
 
-- **WHEN** the user pastes a URL, or asks to improve, redesign, migrate,
+- **WHEN** the user provides a URL or asks to improve, redesign, migrate,
   optimize, audit, or evaluate a site without explicitly requesting a
   development quote and without @-mentioning `@cotizador`
-- **THEN** the primary agent SHALL NOT classify the request as `audit` and
-  SHALL NOT dispatch the `cotizador` subagent; it SHALL classify the work
-  as `spec-required` (or route to `adversarial`/`qa` when the ask is review)
+- **THEN** the primary agent SHALL NOT classify the request as `audit` or
+  dispatch `cotizador`; it SHALL classify the work as `spec-required` or route
+  to `adversarial`/`qa` when the ask is review
 
 #### Scenario: explicit @cotizador mention dispatches the audit
 
-- **WHEN** the user @-mentions `@cotizador` or explicitly asks to quote
-  (cotizar/presupuestar) the development of an application or a
-  development effort, with or without a URL
-- **THEN** the primary agent SHALL classify the request as `audit` and
-  dispatch the `cotizador` subagent
+- **WHEN** the user @-mentions `@cotizador` or explicitly asks for a
+  development quote, with or without a URL
+- **THEN** the primary agent SHALL classify the request as `audit` and dispatch
+  the `cotizador` subagent
 
 ### Requirement: Terra is reserved for irreversible or ambiguous decisions
 
-The system SHALL assign a model to each agent according to the weight of the
-role's default output, using only providers the user is authenticated to.
-The tiers are:
+The system SHALL assign OpenAI models according to the weight of each role's
+default output, using only the OpenAI provider for root, agent, and command
+model assignments. The default tiers SHALL be:
 
-- **Decision tier — `openai/gpt-5.6-terra`**: roles whose default output is
-  an irreversible edit, a high-ambiguity structural decision, or an
-  external-facing audit. The roles are `architect`, `orchestrator`,
-  `refactor`, `adversarial`, `cotizador`, and the `/opsx-propose` command.
-- **Planning tier — `openai/gpt-5.6-luna`**: the `plan` agent, which
-  triages, investigates, and classifies scope on every request but produces
-  a classification that is cheap to revise.
-- **Direct-MiniMax tier — `minimax/MiniMax-M3`** (1 048 576 ctx, $0.3/$1.2):
-  the global root `model` and the `spec-required` class implementation step
-  only. Reserved for sessions whose context budget genuinely exceeds 131k
-  or whose execution depends on the direct-quota isolation guarantee.
-- **Value tier — `ollama-cloud/gpt-oss:20b`** (131 072 ctx, $0.07/$0.3):
-  `build`, `general`, `frontend`, `backend`, `qa`, `explore`,
-  `p5t-installer`, `doctor`, and the global `small_model`. Same model id
-  across both install-time profiles.
+- **Decision — `openai/gpt-5.6-terra`**: `architect`, `orchestrator`,
+  `refactor`, `adversarial`, `cotizador`, and `/opsx-propose`.
+- **Execution — `openai/gpt-6.1-sol`**: root default, `build`, `general`,
+  `frontend`, `backend`, `qa`, and `/opsx-apply`.
+- **Lightweight — `openai/gpt-5.6-luna`**: `plan`, `explore`, `doctor`,
+  `p5t-installer`, `triage`, and root `small_model`.
 
-The system SHALL NOT assign `openai/gpt-5.6-terra` as the default model for
-`plan`, `explore`, `build`, `general`, `frontend`, `backend`, `qa`,
-`p5t-installer`, or `doctor`.
+Both installation profiles SHALL use only IDs from the OpenAI provider. The
+`work` profile MAY select a different OpenAI model for its root default, but
+SHALL NOT change any consumer to another provider.
 
-OpenCode exposes exactly one static `model` per agent, so a mode-dependent
-model is not expressible. The system SHALL therefore assign Terra to
-`adversarial` unconditionally rather than only in `full` mode.
+The system SHALL NOT assign Terra by default to `plan`, `explore`, `build`,
+`general`, `frontend`, `backend`, `qa`, `p5t-installer`, or `doctor`.
+OpenCode exposes one static model per agent, so `adversarial` SHALL use Terra
+in both `targeted` and `full` modes. A command that produces a durable
+planning artifact SHALL use the decision tier even when its invoking agent
+uses a lighter tier.
 
-A command that produces a durable planning artifact SHALL run on the
-decision tier even when the agent that invoked it runs on a cheaper one,
-because the artifact's quality sets the ceiling for the implementation that
-follows.
+OpenCode's ChatGPT Plus/Pro OAuth path SHALL be the documented way to access
+these models. Model usage counts against the ChatGPT plan allowance; the
+configuration SHALL NOT silently substitute an OpenAI API key or API billing.
 
 #### Scenario: explore never runs on Terra by default
 
 - **WHEN** the global `explore` agent is dispatched
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` (or the
-  explicitly user-selected override)
+- **THEN** it SHALL use `openai/gpt-5.6-luna` unless the operator explicitly
+  selects another OpenAI model
 
 #### Scenario: build runs on the Value tier
 
-- **WHEN** the global `build` agent is dispatched for a bounded multi-file
-  edit that does not require a durable planning artifact
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
-  SHALL NOT be `minimax/MiniMax-M3` or `openai/gpt-5.6-terra`
+- **WHEN** `build` is dispatched for bounded implementation work
+- **THEN** it SHALL use `openai/gpt-6.1-sol` and SHALL NOT use an ID from any
+  provider other than OpenAI
 
 #### Scenario: spec-required implementation runs on the direct-MiniMax tier
 
-- **WHEN** a `spec-required` session transitions from the planning step on
-  Terra to the implementation step
-- **THEN** the implementation step SHALL run on `minimax/MiniMax-M3` and
-  SHALL NOT be downgraded to `ollama-cloud/gpt-oss:20b`
+- **WHEN** a spec-required session transitions from proposal to implementation
+- **THEN** implementation SHALL use `openai/gpt-6.1-sol`
 
 #### Scenario: adversarial reviews on the decision tier
 
-- **WHEN** the global `adversarial` agent is dispatched in either `targeted`
-  or `full` mode
-- **THEN** the configured model SHALL be `openai/gpt-5.6-terra`, because
-  adversarial review is a pre-commit gate where a missed finding costs more
-  than the token delta
+- **WHEN** `adversarial` is dispatched in `targeted` or `full` mode
+- **THEN** it SHALL use `openai/gpt-5.6-terra`
 
 #### Scenario: the propose command runs on the decision tier
 
-- **WHEN** `/opsx-propose` is invoked from a session whose agent is `plan`
-  (the planning tier)
-- **THEN** the command SHALL declare `model: openai/gpt-5.6-terra` and the
-  proposal SHALL be generated on Terra, not on the invoking agent's cheaper
-  model
+- **WHEN** `/opsx-propose` is invoked from a planning-tier session
+- **THEN** the command SHALL use `openai/gpt-5.6-terra`
 
 #### Scenario: plan does not run on the decision tier
 
 - **WHEN** the `plan` agent is dispatched
-- **THEN** the configured model SHALL be `openai/gpt-5.6-luna` and SHALL NOT
-  be `openai/gpt-5.6-terra`
+- **THEN** it SHALL use `openai/gpt-5.6-luna` and SHALL NOT use
+  `openai/gpt-5.6-terra` by default
 
 #### Scenario: doctor runs on the value tier
 
-- **WHEN** the global `doctor` subagent is dispatched
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
-  SHALL NOT be `openai/gpt-5.6-terra`, because the doctor's role is
-  read-only inspection and safe repair, not irreversible decisions
+- **WHEN** the read-only `doctor` subagent is dispatched
+- **THEN** it SHALL use `openai/gpt-5.6-luna`
 
 ### Requirement: Subagent depth is bounded and auditable
 
@@ -347,48 +327,39 @@ dispatcher list drifts from this rule.
 
 ### Requirement: Agents opt in to the value tier when no implementation work is required
 
-The system SHALL assign `ollama-cloud/gpt-oss:20b` to `explore`,
-`p5t-installer`, and `doctor` regardless of the work classification
-because none of those roles perform implementation. The value tier is
-the cheapest tier and the routing matrix SHALL treat these agents as
-default-value consumers.
+The system SHALL assign `openai/gpt-5.6-luna` to `explore`, `p5t-installer`,
+and `doctor` regardless of work classification because those roles do not
+perform implementation. These defaults SHALL remain OpenAI model IDs.
 
 #### Scenario: explore runs on the value tier
 
-- **WHEN** the global `explore` agent is dispatched
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` (or
-  the explicitly user-selected override) and SHALL NOT be
-  `openai/gpt-5.6-terra`
+- **WHEN** the `explore` agent is dispatched
+- **THEN** it SHALL use `openai/gpt-5.6-luna` unless the operator explicitly
+  selects another OpenAI model
 
 #### Scenario: doctor runs on the value tier
 
-- **WHEN** the global `doctor` agent is dispatched
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
-  SHALL NOT be `openai/gpt-5.6-terra`
+- **WHEN** the `doctor` agent is dispatched
+- **THEN** it SHALL use `openai/gpt-5.6-luna`
 
 #### Scenario: p5t-installer runs on the value tier
 
-- **WHEN** the global `p5t-installer` agent is dispatched
-- **THEN** the configured model SHALL be `ollama-cloud/gpt-oss:20b` and
-  SHALL NOT be `openai/gpt-5.6-terra`
+- **WHEN** the `p5t-installer` agent is dispatched
+- **THEN** it SHALL use `openai/gpt-5.6-luna`
 
 ### Requirement: /opsx-propose runs on the decision tier regardless of the invoking agent
 
-The `/opsx-propose` global command SHALL declare `model:
-openai/gpt-5.6-terra` in its frontmatter so the proposal is generated
-on the decision tier even when the agent that invoked it runs on a
-cheaper tier (typically `plan` on `gpt-5.6-luna`). The proposal
-quality sets the ceiling for the implementation that follows, so
-running it on a cheaper tier would let a weaker model anchor the
-decision the implementation is held to.
+The `/opsx-propose` command SHALL use `openai/gpt-5.6-terra` so the proposal
+is generated on the decision tier even when its invoking agent uses a lighter
+model. The proposal quality sets the ceiling for the implementation that
+follows.
 
 #### Scenario: /opsx-propose runs on Terra from a planning-tier session
 
-- **WHEN** the operator invokes `/opsx-propose <name>` from a session
-  whose agent is `plan` (the planning tier)
-- **THEN** the command SHALL run on `openai/gpt-5.6-terra` and the
-  proposal SHALL be generated on Terra, not on the invoking agent's
-  cheaper model
+- **WHEN** the operator invokes `/opsx-propose <name>` from a session whose
+  agent is `plan`
+- **THEN** the command SHALL run on `openai/gpt-5.6-terra`
+
 
 ### Requirement: Adversarial review dispatch is risk-proportionate
 
@@ -541,3 +512,23 @@ The system SHALL deliver the essential continuity and stop controls in installed
 #### Scenario: Permission or cancellation controls remain authoritative
 - **WHEN** permission is denied, the user cancels, or continuation requires new authorization
 - **THEN** the agent SHALL respect that boundary without automatic renewal or a broader scope
+
+### Requirement: Agent and command model assignments use only OpenAI
+
+The root model, `small_model`, every global agent, and every command model
+override in every installation profile SHALL use an `openai/` model ID.
+Validation SHALL report the profile and consumer when any assignment uses
+another provider. This restriction applies to OpenCode model routing; it does
+not change separately invoked external services used by tools.
+
+#### Scenario: a non-OpenAI profile assignment is rejected
+
+- **WHEN** any profile assigns a root, agent, or command model whose ID does
+  not begin with `openai/`
+- **THEN** configuration validation SHALL fail and identify that profile and
+  consumer
+
+#### Scenario: a non-OpenAI command override is rejected
+
+- **WHEN** a command frontmatter declares a model outside the OpenAI provider
+- **THEN** configuration validation SHALL fail and identify the command

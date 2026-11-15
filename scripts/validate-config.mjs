@@ -589,6 +589,26 @@ function runProfileChecks() {
     fail(manifestFile, `manifest is missing a profiles object`);
   }
 
+  // OpenAI is the only permitted provider for root, agent, and command
+  // assignments. Check every profile so selecting one cannot hide a
+  // non-OpenAI assignment in another profile.
+  for (const [declaredProfileName, declaredProfile] of Object.entries(manifest.profiles || {})) {
+    for (const [section, assignments] of Object.entries({
+      root: declaredProfile?.root,
+      agents: declaredProfile?.agents,
+      commands: declaredProfile?.commands,
+    })) {
+      for (const [consumer, model] of Object.entries(assignments || {})) {
+        if (typeof model !== 'string' || !model.startsWith('openai/')) {
+          fail(
+            manifestFile,
+            `profile '${declaredProfileName}' ${section}.${consumer}: model '${model}' must use the OpenAI provider (openai/)`,
+          );
+        }
+      }
+    }
+  }
+
   const profileName = resolveProfileName(manifest);
   if (!profileName) {
     fail(manifestFile, `cannot resolve a profile (no --profile argument and no defaultProfile)`);
@@ -636,6 +656,9 @@ function runProfileChecks() {
       const name = f.replace(/\.md$/, '');
       const fm = readFrontmatter(join(commandsDir, f));
       if (fm && typeof fm.model === 'string') {
+        if (!fm.model.startsWith('openai/')) {
+          fail(join(commandsDir, f), `command '${name}' model '${fm.model}' must use the OpenAI provider (openai/)`);
+        }
         if (!profile.commands[name]) {
           fail(manifestFile, `profile '${profileName}' is missing command '${name}'`);
         }
@@ -671,7 +694,7 @@ function runProfileChecks() {
   if (!existsSync(catalogPath)) {
     console.log(
       `validate-config: skip — models catalog not found at ${catalogPath}; ` +
-        `ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
+        `model ids are not checked`,
     );
     if (process.platform === 'win32') {
       console.log(
@@ -687,7 +710,7 @@ function runProfileChecks() {
     } catch {
       console.log(
         `validate-config: skip — models catalog at ${catalogPath} is not parseable; ` +
-          `ollama-cloud/gpt-oss:20b and other provider/model ids are not checked`,
+          `model ids are not checked`,
       );
     }
     if (catalog) {
