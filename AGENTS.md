@@ -126,13 +126,18 @@ up the previous one to `opencode.jsonc.bak.<timestamp>`).
 
 ### Default: `personal`
 
-The `personal` profile mirrors the documented current assignment: direct
-MiniMax for `spec-required` implementation and the root default, Ollama
-Cloud MiniMax for bounded execution (`build`, `general`, `frontend`,
-`backend`, `qa`), the planning tier for `plan`, the decision tier for the
-irreversible agents (`architect`, `orchestrator`, `refactor`, `adversarial`,
-`cotizador`), and the value tier (`ollama-cloud/gpt-oss:20b`) for the cheap
-reads (`explore`, `doctor`, `p5t-installer`, the global `small_model`).
+Both profiles use only OpenAI models for the OpenCode root, every agent, and
+every command override. The `personal` profile uses `openai/gpt-6.1-sol` as
+the root default and execution model, `openai/gpt-5.6-terra` for decisions,
+and `openai/gpt-5.6-luna` for lightweight work. The `work` demonstration profile
+uses `openai/gpt-5.6-terra` as its root default; agent assignments stay the
+same. See `agent/routing.md` for the role matrix.
+
+OpenCode supports ChatGPT Plus/Pro OAuth for OpenAI models. Usage counts
+against the ChatGPT plan allowance. OpenAI API billing is separate; this
+repository does not add or store API keys. See the
+[OpenCode provider documentation](https://opencode.ai/docs/providers) and
+[OpenAI billing documentation](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform).
 
 `commands/*.md` keep their `model:` frontmatter — the install flow symlinks
 the whole `commands/` directory as a unit, and per-file rendering is out of
@@ -142,11 +147,10 @@ model is covered by the selected profile.
 
 ### `work` is a demonstration profile
 
-The `work` profile in `config/model-profiles.json` is a documented example
-that flips the heavy execution tier to `openai/gpt-5.6-terra` so the install
-flow can be smoke-tested without changing personal defaults. It is NOT a
-recommendation. Replace its values with your real work assignment through
-the OpenSpec workflow before relying on it.
+The `work` profile in `config/model-profiles.json` is a demonstration that
+selects `openai/gpt-5.6-terra` as the root default. It is NOT a recommendation
+for a separate provider or API billing. Both profiles stay on OpenAI; change
+their model assignments through the OpenSpec workflow.
 
 ### Adding a new profile
 

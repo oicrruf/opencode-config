@@ -1,7 +1,7 @@
 ---
 description: MiniMax CLI — text, images, video, speech, web search via mmx (hidden skill, user-invoked)
 agent: build
-model: ollama-cloud/gpt-oss:20b
+model: openai/gpt-5.6-luna
 ---
 
 The following is the canonical `mmx-cli` skill, injected from its installed

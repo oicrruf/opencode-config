@@ -1,7 +1,7 @@
 ---
 description: Dedupe scan — find duplicated patterns and propose a single-source-of-truth refactor, read-only
 agent: build
-model: ollama-cloud/gpt-oss:20b
+model: openai/gpt-5.6-luna
 ---
 
 The following is the canonical `dedupe` skill, injected from its installed

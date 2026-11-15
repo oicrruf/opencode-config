@@ -17,6 +17,7 @@
 // Run with: `node scripts/test-model-profiles.mjs`
 // Exit code: 0 when every check passes, 1 otherwise.
 
+import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,9 +72,9 @@ check('default profile equals manifest.defaultProfile', () => {
     const r = nodeExec(['scripts/render-config.mjs', '--output', out]);
     if (r.status !== 0) throw new Error(`render failed: ${r.stderr}`);
     const rendered = readJsonc(out);
-    // Default is the personal profile (assigns build → ollama-cloud/gpt-oss:20b).
-    if (rendered.agent.build.model !== 'ollama-cloud/gpt-oss:20b') {
-      throw new Error(`default render produced build=${rendered.agent.build.model}, expected ollama-cloud/gpt-oss:20b (personal)`);
+    // Default is the personal profile and uses OpenAI for implementation.
+    if (rendered.agent.build.model !== 'openai/gpt-6.1-sol') {
+      throw new Error(`default render produced build=${rendered.agent.build.model}, expected openai/gpt-6.1-sol (personal)`);
     }
     if (manifest.defaultProfile !== 'personal') {
       throw new Error(`manifest.defaultProfile is ${manifest.defaultProfile}, expected personal`);
@@ -92,8 +93,8 @@ check('explicit --profile personal matches default', () => {
     const r1 = renderProfile('personal', outPersonal);
     if (r1.status !== 0) throw new Error(`render personal failed: ${r1.stderr}`);
     const rendered = readJsonc(outPersonal);
-    if (rendered.model !== 'minimax/MiniMax-M3') {
-      throw new Error(`personal root.model=${rendered.model}, expected minimax/MiniMax-M3`);
+    if (rendered.model !== 'openai/gpt-6.1-sol') {
+      throw new Error(`personal root.model=${rendered.model}, expected openai/gpt-6.1-sol`);
     }
     return `personal renders root.model=${rendered.model}`;
   } finally {
@@ -103,12 +104,8 @@ check('explicit --profile personal matches default', () => {
 
 // 3. Explicit --profile work renders distinct assignments
 //
-// After the unify-execution-tier-on-gpt-oss change, both profiles render
-// the same model id for every per-agent slot. The remaining differentiator
-// is the root default (`minimax/MiniMax-M3` for personal,
-// `openai/gpt-5.6-terra` for work) and the `opsx-apply` command. The test
-// confirms at least one of those differentiators exists, ensuring the two
-// profiles are still distinct install-time choices.
+// Both profiles share the same per-agent OpenAI tiers. The root default
+// distinguishes them: Sol for personal and Terra for the work demonstration.
 check('explicit --profile work renders distinct assignments', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'profile-work-'));
   try {
@@ -120,27 +117,47 @@ check('explicit --profile work renders distinct assignments', () => {
     if (rW.status !== 0) throw new Error(`render work failed: ${rW.stderr}`);
     const personal = readJsonc(outPersonal);
     const work = readJsonc(outWork);
-    // Per-agent slots may now be identical across profiles; that is the
-    // intended outcome of unify-execution-tier-on-gpt-oss. The remaining
-    // differentiator is the root default (which is what `./install.sh`
-    // chooses between at install time).
+    // Per-agent slots are intentionally identical across profiles; the
+    // demonstration profile changes only the root default.
     if (personal.model === work.model) {
       throw new Error(`work did not change root.model (still ${work.model}); profiles have collapsed`);
     }
-    // Cross-check: the per-agent slots in both profiles are now unified
-    // on ollama-cloud/gpt-oss:20b for the 5 bounded-execution agents.
-    // Guard against a future change that accidentally re-introduces drift
-    // between profiles for these slots.
+    // Guard against future drift in the five execution-agent assignments.
     const executionAgents = ['build', 'general', 'frontend', 'backend', 'qa'];
     for (const name of executionAgents) {
       if (personal.agent[name].model !== work.agent[name].model) {
         throw new Error(`execution tier diverged: personal.${name}=${personal.agent[name].model}, work.${name}=${work.agent[name].model}; expected identical`);
       }
     }
+    if (personal.model !== 'openai/gpt-6.1-sol' || work.model !== 'openai/gpt-5.6-terra') {
+      throw new Error(`profile roots must be OpenAI Sol/Terra, got ${personal.model}/${work.model}`);
+    }
     return `personal root=${personal.model}, work root=${work.model}; 5 execution agents identical`;
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+check('every profile and command override uses an OpenAI model', () => {
+  const manifest = readManifest();
+  for (const [profileName, profile] of Object.entries(manifest.profiles)) {
+    for (const section of ['root', 'agents', 'commands']) {
+      for (const [consumer, model] of Object.entries(profile[section] ?? {})) {
+        if (typeof model !== 'string' || !model.startsWith('openai/')) {
+          throw new Error(`${profileName}.${section}.${consumer} has non-OpenAI model ${model}`);
+        }
+      }
+    }
+  }
+  const commandsDir = join(repoRoot, 'commands');
+  for (const file of readdirSync(commandsDir).filter((name) => name.endsWith('.md'))) {
+    const frontmatter = readFileSync(join(commandsDir, file), 'utf8').match(/^---\n([\s\S]*?)\n---\n/);
+    const model = frontmatter?.[1].match(/^model:\s*(.+)$/m)?.[1];
+    if (model && !model.startsWith('openai/')) {
+      throw new Error(`${file} frontmatter uses non-OpenAI model ${model}`);
+    }
+  }
+  return `${Object.keys(manifest.profiles).length} profiles and command frontmatter use openai/`;
 });
 
 check('both profiles omit primary steps and retain specialist budgets', () => {

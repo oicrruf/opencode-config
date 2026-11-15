@@ -267,19 +267,19 @@ group('routing');
 
 const EXPECTED_AGENT_MODELS = {
   plan: 'openai/gpt-5.6-luna',
-  build: 'ollama-cloud/gpt-oss:20b',
-  general: 'ollama-cloud/gpt-oss:20b',
-  explore: 'ollama-cloud/gpt-oss:20b',
+  build: 'openai/gpt-6.1-sol',
+  general: 'openai/gpt-6.1-sol',
+  explore: 'openai/gpt-5.6-luna',
   architect: 'openai/gpt-5.6-terra',
   orchestrator: 'openai/gpt-5.6-terra',
   refactor: 'openai/gpt-5.6-terra',
-  frontend: 'ollama-cloud/gpt-oss:20b',
-  backend: 'ollama-cloud/gpt-oss:20b',
-  qa: 'ollama-cloud/gpt-oss:20b',
+  frontend: 'openai/gpt-6.1-sol',
+  backend: 'openai/gpt-6.1-sol',
+  qa: 'openai/gpt-6.1-sol',
   adversarial: 'openai/gpt-5.6-terra',
   cotizador: 'openai/gpt-5.6-terra',
-  'p5t-installer': 'ollama-cloud/gpt-oss:20b',
-  triage: 'ollama-cloud/gpt-oss:20b',
+  'p5t-installer': 'openai/gpt-5.6-luna',
+  triage: 'openai/gpt-5.6-luna',
 };
 
 check('resolved config matches the routing matrix for every agent', () => {
@@ -505,7 +505,7 @@ check('primary continuity includes progress and permission stop conditions', () 
 check('small_model is on the value tier', () => {
   const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
   assert(
-    cfg.small_model === 'ollama-cloud/gpt-oss:20b',
+    cfg.small_model === 'openai/gpt-5.6-luna',
     `small_model is ${cfg.small_model}`,
   );
   return cfg.small_model;
@@ -515,11 +515,11 @@ check('command model tiers match the routing decision', () => {
   const commandsDir = join(repoRoot, 'commands');
   const expected = {
     'opsx-propose': 'openai/gpt-5.6-terra',
-    'opsx-apply': 'minimax/MiniMax-M3',
-    archify: 'ollama-cloud/gpt-oss:20b',
-    dedupe: 'ollama-cloud/gpt-oss:20b',
-    mmx: 'ollama-cloud/gpt-oss:20b',
-    'mmx-h3-video': 'ollama-cloud/gpt-oss:20b',
+    'opsx-apply': 'openai/gpt-6.1-sol',
+    archify: 'openai/gpt-5.6-luna',
+    dedupe: 'openai/gpt-5.6-luna',
+    mmx: 'openai/gpt-5.6-luna',
+    'mmx-h3-video': 'openai/gpt-5.6-luna',
   };
   const mismatches = [];
   for (const [name, tier] of Object.entries(expected)) {
@@ -1170,7 +1170,7 @@ if (LIVE) {
     // the permission rule, not the model.
     const out = run('opencode', [
       'run', '--agent', 'build',
-      '-m', 'ollama-cloud/gpt-oss:20b',
+      '-m', 'openai/gpt-6.1-sol',
       '--format', 'json',
       'Call the skill tool with name exactly "archify". Then report whether it ' +
         'worked. If it did work, quote its first heading.',
@@ -1248,8 +1248,8 @@ if (LIVE) {
     const data = JSON.parse(exported.slice(exported.indexOf('{')));
     const model = data.info?.model;
     assert(
-      model?.providerID === 'ollama-cloud' && model?.id === 'gpt-oss:20b',
-      `wrapper ran on ${model?.providerID}/${model?.id}, expected ollama-cloud/gpt-oss:20b`,
+      model?.providerID === 'openai' && model?.id === 'gpt-6.1-sol',
+      `wrapper ran on ${model?.providerID}/${model?.id}, expected openai/gpt-6.1-sol`,
     );
     const userText = (data.messages ?? [])
       .filter((m) => m.info?.role === 'user')

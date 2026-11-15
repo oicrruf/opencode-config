@@ -9,63 +9,65 @@ exactly one class, and applies the matching row.
 
 ## Work classes
 
-| Class          | Default model                       | Subagent depth | Specialist count | Browser MCP | Notes |
-|----------------|-------------------------------------|----------------|------------------|-------------|-------|
-| `small`        | `ollama-cloud/gpt-oss:20b`          | 0              | 0                | deny        | inline edits; no specialist dispatch |
-| `medium`       | `ollama-cloud/gpt-oss:20b`           | 1              | 0–1              | deny        | bounded multi-file work, no durable decision |
-| `spec-required`| `openai/gpt-5.6-terra` (planning) + `minimax/MiniMax-M3` (implementation) | 1 | 0–2 | only with explicit risk | proposal first, then implement |
-| `audit`        | `openai/gpt-5.6-terra`              | 1              | 0–1              | required    | explicit `@cotizador` or development-quote request only |
+| Class | Default model | Subagent depth | Specialist count | Browser MCP | Notes |
+|---|---|---:|---:|---|---|
+| `small` | `openai/gpt-5.6-luna` | 0 | 0 | deny | inline edits; no specialist dispatch |
+| `medium` | `openai/gpt-5.6-luna` | 1 | 0–1 | deny | bounded work; use `build` on the execution tier for implementation |
+| `spec-required` | `openai/gpt-5.6-terra` (planning) + `openai/gpt-6.1-sol` (implementation) | 1 | 0–2 | only with explicit risk | proposal first, then implement |
+| `audit` | `openai/gpt-5.6-terra` | 1 | 0–1 | required | explicit `@cotizador` or development-quote request only |
 
 ## Model tiers
 
-Models follow decision weight. Every id must resolve against a provider
-authenticated in `auth.json`; `scripts/validate-config.mjs` enforces it.
+All OpenCode model assignments use the authenticated `openai/` provider.
+Assignments are selected by role and work weight, not by API token prices:
 
-| Tier             | Model                          | In / Out (USD per M) | Context | Roles |
-|------------------|--------------------------------|----------------------|---------|-------|
-| Decision         | `openai/gpt-5.6-terra`         | $2 / $12             | —       | `architect`, `orchestrator`, `refactor`, `adversarial`, `cotizador`, `/opsx-propose` |
-| Planning         | `openai/gpt-5.6-luna`          | $0.2 / $1.2          | —       | `plan` (triage only) |
-| Direct-MiniMax   | `minimax/MiniMax-M3`           | $0.3 / $1.2          | 1M      | root default, `spec-required` implementation |
-| Value            | `ollama-cloud/gpt-oss:20b`     | $0.07 / $0.3         | 131k    | `build`, `general`, `frontend`, `backend`, `qa`, `explore`, `p5t-installer`, `small_model` |
+| Tier | Model | Roles |
+|---|---|---|
+| Decision | `openai/gpt-5.6-terra` | `architect`, `orchestrator`, `refactor`, `adversarial`, `cotizador`, `/opsx-propose` |
+| Execution | `openai/gpt-6.1-sol` | root default in `personal`, `build`, `general`, `frontend`, `backend`, `qa`, `/opsx-apply` |
+| Lightweight | `openai/gpt-5.6-luna` | `plan`, `explore`, `doctor`, `p5t-installer`, `triage`, global `small_model` |
 
-A command that produces a durable planning artifact runs on the **decision**
-tier even when its invoking agent runs cheaper: the artifact's quality sets
-the ceiling for the implementation that follows. `/opsx-propose` is the case
-in point — `plan` invokes it on luna, but the proposal itself is generated on
-terra.
+The `work` demonstration profile uses `openai/gpt-5.6-terra` as its root
+default. All agent assignments remain on OpenAI in both profiles.
+
+OpenCode supports signing in to OpenAI with a ChatGPT Plus or Pro plan. Model
+usage counts against that plan's allowance; it is not unlimited. The provider
+documentation describes the current model context caps. API usage remains a
+separate billing system, and this repository does not add or store API keys.
+See [OpenCode provider setup](https://opencode.ai/docs/providers) and
+[OpenAI billing separation](https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform).
 
 ## Per-agent defaults
 
-The defaults below override the class row only where noted. Anything missing
-inherits from the class.
+The model assignments below match both profiles; only the root default varies.
 
-| Agent                | Default model            | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
-|----------------------|--------------------------|---------|-------------|-----------|--------|----------|
-| `plan`               | `openai/gpt-5.6-luna`    | omitted | deny        | allow     | deny   | allow     |
-| `build`              | `ollama-cloud/gpt-oss:20b`| omitted | deny        | allow     | deny   | allow     |
-| `general`            | `ollama-cloud/gpt-oss:20b`| 80      | deny        | allow     | deny   | allow     |
-| `explore`            | `ollama-cloud/gpt-oss:20b` | 25    | deny        | allow     | deny   | deny      |
-| `architect`          | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
-| `orchestrator`       | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
-| `refactor`           | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | allow  | allow     |
-| `frontend`           | `ollama-cloud/gpt-oss:20b`| 80      | allow       | allow     | deny   | deny      |
-| `backend`            | `ollama-cloud/gpt-oss:20b`| 80      | deny        | allow     | deny   | allow     |
-| `qa`                 | `ollama-cloud/gpt-oss:20b`| 60      | allow       | allow     | deny   | deny      |
-| `adversarial`        | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | allow     |
-| `cotizador`          | `openai/gpt-5.6-terra`   | 100     | allow       | allow     | deny   | deny      |
-| `p5t-installer`      | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
-| `doctor`             | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
+| Agent | Default model | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
+|---|---|---:|---|---|---|---|
+| `plan` | `openai/gpt-5.6-luna` | omitted | deny | allow | deny | allow |
+| `build` | `openai/gpt-6.1-sol` | omitted | deny | allow | deny | allow |
+| `general` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow |
+| `explore` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny |
+| `architect` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow |
+| `orchestrator` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow |
+| `refactor` | `openai/gpt-5.6-terra` | 100 | deny | allow | allow | allow |
+| `frontend` | `openai/gpt-6.1-sol` | 80 | allow | allow | deny | deny |
+| `backend` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow |
+| `qa` | `openai/gpt-6.1-sol` | 60 | allow | allow | deny | deny |
+| `adversarial` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | allow |
+| `cotizador` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | deny |
+| `p5t-installer` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow |
+| `doctor` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow |
+| `triage` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny |
 
-`steps` is omitted for the primary agents `build` and `plan`: native
-execution continues while authorized work remains and progress is being made.
-The other agents are bounded specialists; their `steps` value is a **ceiling**,
-not a quota. Targeted/full reviewers use their highest-mode allowance and stop
-as soon as their scoped work is complete. `triage` (not listed above) keeps 25.
+`commands/*.md` keep their `model:` frontmatter because the installer symlinks
+the whole directory. The manifest's `commands` section is informational; the
+validator confirms every command override is covered and uses an OpenAI model ID.
 
-Follow the continuity, checkpoints, no-progress threshold, and interruption
-handoff policy in `AGENTS.md`. Specialist exhaustion returns incomplete evidence
-to the coordinator; it does not by itself end the primary task. The coordinator
-must preserve permission, scope, depth, and review re-dispatch gates.
+`steps` is omitted for the primary agents `build` and `plan`: native execution
+continues while authorized work remains and progress is being made. The other
+agents are bounded specialists; their `steps` value is a ceiling, not a quota.
+Targeted/full reviewers use their highest-mode allowance and stop as soon as
+their scoped work is complete. `triage` is bounded at 25 steps.
 
 ## Classification gate
 

@@ -57,7 +57,7 @@
         "bash": "deny",
         "codegraph_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-5.6-luna"
     },
     "adversarial": {
       "steps": 100,
@@ -82,7 +82,7 @@
         "reservation_*": "allow",
         "worktree_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-6.1-sol"
     },
     "general": {
       "steps": 80,
@@ -91,7 +91,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-6.1-sol"
     },
     "frontend": {
       "steps": 80,
@@ -103,7 +103,7 @@
         "sandbox_*": "allow",
         "reservation_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-6.1-sol"
     },
     "backend": {
       "steps": 80,
@@ -115,7 +115,7 @@
         "sandbox_*": "allow",
         "reservation_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-6.1-sol"
     },
     "qa": {
       "steps": 60,
@@ -125,7 +125,7 @@
         "codegraph_*": "allow",
         "playwright_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-6.1-sol"
     },
     "cotizador": {
       "steps": 100,
@@ -195,7 +195,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-5.6-luna"
     },
     "doctor": {
       "steps": 100,
@@ -206,7 +206,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-5.6-luna"
     },
     "triage": {
       "steps": 25,
@@ -220,7 +220,7 @@
         "codegraph_*": "allow",
         "context7_*": "allow"
       },
-      "model": "ollama-cloud/gpt-oss:20b"
+      "model": "openai/gpt-5.6-luna"
     }
   },
   "mcp": {
@@ -267,5 +267,5 @@
     }
   },
   "model": "openai/gpt-5.6-terra",
-  "small_model": "ollama-cloud/gpt-oss:20b"
+  "small_model": "openai/gpt-5.6-luna"
 }
