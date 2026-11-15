@@ -28,6 +28,7 @@ import {
   symlinkSync,
   existsSync,
   readFileSync,
+  readlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -186,7 +187,23 @@ test("each excluded kind is absent from a capture", () => {
     // The deny list is the default: a path is excluded unless the
     // declared configuration includes it.
     assert.equal(isExcluded(".env").excluded, true);
-    assert.equal(isExcluded(".env", [".env"]).excluded, false);
+    assert.equal(isExcluded(".env", [".env"]).excluded, true);
+  });
+});
+
+test("included paths cannot override secret exclusions and internal symlinks are preserved", () => {
+  withRepo((dir) => {
+    writeFileSync(join(dir, ".env"), "DATABASE_URL=fixture-only-value\n");
+    writeFileSync(join(dir, "z-target.txt"), "captured\n");
+    symlinkSync("z-target.txt", join(dir, "a-link.txt"));
+    const result = takeCapture({ worktreePath: dir, workId: "work-1", executionId: "symlink", cwd: dir, include: [".env"] });
+    assert.equal(result.ok, true);
+    assert.equal(existsSync(join(result.destination, ".env")), false);
+    assert.equal(readlinkSync(join(result.destination, "a-link.txt")), "z-target.txt");
+    assert.equal(readFileSync(join(result.destination, "a-link.txt"), "utf8"), "captured\n");
+    assert.deepEqual(result.manifest.files.find((file) => file.path === "a-link.txt"), {
+      path: "a-link.txt", kind: "symlink", target: "z-target.txt", fingerprint: null,
+    });
   });
 });
 
@@ -209,6 +226,7 @@ test("credential scanning distinguishes code references from embedded credential
   assert.equal(screenValue("return { token: acquired.token };"), null);
   assert.equal(screenValue('const apiKey = "sk-abcdefghijklmnop123456";'), "the value looks like a named credential assignment");
   assert.equal(screenValue('password: "not-a-real-secret-but-long"'), "the value looks like a named credential assignment");
+  assert.equal(screenValue('{"password":"fixture-only-password-123"}'), "the value looks like a named credential assignment");
 });
 
 test("the argument set carries none of the forbidden options", () => {

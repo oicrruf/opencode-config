@@ -1,7 +1,7 @@
 // Execute the pinned OpenCode V2 plugin-loading fixture through sandbox-control.
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
@@ -65,6 +65,7 @@ const started = await startSandbox({ cwd, worktreePath: cwd, workId: 'AT-188-v2-
 if (!started.ok) {
   console.log(JSON.stringify({ cwd, started }, null, 2));
   process.exitCode = 1;
+  rmSync(cwd, { recursive: true, force: true });
 } else {
   let observations;
   let runtimeDiagnostics = {};
@@ -153,7 +154,7 @@ if (!started.ok) {
       engine: engine.binding,
       image: { id: image.Id, os: image.Os, architecture: image.Architecture, ref: imageName },
       opencodeVersion: version,
-      installedConfig: { path: '/fixture/opencode.json', sha256: createHash('sha256').update(readFileSync(join(cwd, 'opencode.json'))).digest('hex'), plugins: JSON.parse(readFileSync(join(cwd, 'opencode.json'), 'utf8')).plugins },
+      installedConfig: { path: '/fixture/opencode.json', sha256: createHash('sha256').update(readFileSync(join(cwd, 'runtime-fixture.json'))).digest('hex'), plugins: JSON.parse(readFileSync(join(cwd, 'runtime-fixture.json'), 'utf8')).plugins },
       runHelpFlags: helpFlags,
       toolListingApi: 'V2 plugin context ctx.tool.list()',
       toolIds,
@@ -203,10 +204,12 @@ if (!started.ok) {
       isolation: observations?.isolation ?? null,
       failure: observations?.failure ?? null,
       closure: { cleanupOk: closed.cleanup?.ok === true, removed: closed.cleanup?.removed ?? [], remaining: closed.cleanup?.remaining ?? [], quotaReleased: closed.quotaReleased === true },
+      sandboxReport: closed.reportPath ? JSON.parse(readFileSync(closed.reportPath, 'utf8')) : null,
       differencesFromProduction: observations?.differencesFromProduction ?? ['macOS client controls the local Docker Desktop Linux VM'],
     };
-    const evidencePath = fileURLToPath(new URL('../openspec/changes/soportar-docker-desktop-local/runtime-evidence.json', import.meta.url));
+    const evidencePath = fileURLToPath(new URL('../openspec/changes/archive/2026-11-15-soportar-docker-desktop-local/runtime-evidence.json', import.meta.url));
     writeFileSync(evidencePath, JSON.stringify(durableEvidence, null, 2) + '\n');
+    rmSync(cwd, { recursive: true, force: true });
     console.log(JSON.stringify({ result: durableEvidence.result, executionId: durableEvidence.executionId,
       opencodeVersion: durableEvidence.opencodeVersion, toolRegistrationCounts: durableEvidence.toolRegistrationCounts,
       isolation: durableEvidence.isolation, evidencePath, closure: durableEvidence.closure }, null, 2));

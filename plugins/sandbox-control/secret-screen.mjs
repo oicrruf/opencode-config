@@ -15,8 +15,8 @@ import { readFileSync, statSync } from "node:fs";
 // A key that carries a name, an assignment, and a value. The value part
 // is what makes it a credential rather than a mention.
 const ASSIGNMENT_PATTERNS = [
-  /\b(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|bearer[_-]?token|encryption[_-]?key|signing[_-]?key)\b\s*[:=]\s*["']?([^\s"',;]{8,})/gi,
-  /\b(?:password|passwd|pwd|secret|token)\b\s*[:=]\s*["']?([^\s"',;]{8,})/gi,
+  /["']?\b(?:api[_-]?key|apikey|access[_-]?key|secret[_-]?key|client[_-]?secret|private[_-]?key|auth[_-]?token|access[_-]?token|refresh[_-]?token|bearer[_-]?token|encryption[_-]?key|signing[_-]?key)\b["']?\s*[:=]\s*["']?([^\s"',;}{]{8,})/gi,
+  /["']?\b(?:password|passwd|pwd|secret|token)\b["']?\s*[:=]\s*["']?([^\s"',;}{]{8,})/gi,
 ];
 
 // A provider-shaped key on its own, with no assignment around it.

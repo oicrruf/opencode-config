@@ -1,6 +1,6 @@
 {
   "result": "passed",
-  "executionId": "at188-v2-runtime-1a8c22f2",
+  "executionId": "at188-v2-runtime-b133b7cc",
   "opencodeVersion": "opencode v2.2.7",
   "image": {
     "id": "sha256:7b1e3139a64121d12e572530974a18b9452967fb4d67516d8cfd9c0e763dd57d",
@@ -25,10 +25,10 @@
       "./.opencode/plugins/runtime-probe"
     ]
   },
-  "fixtureFingerprint": "996f446937aac4ccef7188a55030c29b2707b1f6c3a6f9ef2183de0c2189b85d",
+  "fixtureFingerprint": "0782b931997d99ceb6e544915f121e469db65275ec11449372bebc3855d495df",
   "capture": {
-    "fingerprint": "963521cf9647d26997659509bab1f4c9ff29efd1278785d59259d2889eee80b2",
-    "fileCount": 28,
+    "fingerprint": "5f26bb8155a99fa4e606e7d722a5b8a4203c26ff9e375c597bbf8bd494f5c411",
+    "fileCount": 29,
     "destinationIndependent": true
   },
   "observedToolIds": [
@@ -154,19 +154,61 @@
     "removed": [
       {
         "kind": "container",
-        "id": "ee072c755573"
+        "id": "b11551614655"
       },
       {
         "kind": "network",
-        "id": "5820a4d472c1"
+        "id": "80c4585d62f8"
       },
       {
         "kind": "image",
-        "id": "596f7161eb4d"
+        "id": "510212dc18c4"
       }
     ],
     "remaining": [],
     "quotaReleased": true
+  },
+  "sandboxReport": {
+    "version": 1,
+    "result": "passed",
+    "executionId": "at188-v2-runtime-b133b7cc",
+    "workId": "AT-188-v2-runtime",
+    "workName": "at188-v2-runtime",
+    "startedAt": "2026-11-15T18:43:12.863Z",
+    "concludedAt": "2026-11-15T18:43:17.973Z",
+    "capture": {
+      "branch": null,
+      "head": null,
+      "files": 29,
+      "fingerprint": "0ade711507b2213c86871f3de15906c1847ab878f08a9dea80b3b2ecb8ac2752"
+    },
+    "engine": {
+      "schemaVersion": 1,
+      "endpoint": "unix:///Users/oicrruf/.docker/run/docker.sock",
+      "platform": "darwin",
+      "id": "38272e5f-761f-4a7b-be8c-e2e128eb7e73",
+      "osType": "linux",
+      "operatingSystem": "Docker Desktop",
+      "version": "29.7.2",
+      "architecture": "aarch64"
+    },
+    "image": "sandbox/at188-v2-runtime:at188-v2-runtime-b133b7cc",
+    "container": "sandbox-at188-v2-runtime-b133b7cc",
+    "network": "sandbox-net-at188-v2-runtime-b133b7cc",
+    "steps": [
+      "Verify local engine binding and exact pinned OpenCode image",
+      "Start a V2 session inside the sandbox and observe public ctx.tool.list() results from the fixture plugin",
+      "Inspect isolation, save external observations, then close attributable resources"
+    ],
+    "differencesFromProduction": [
+      "macOS client controls the local Docker Desktop Linux VM",
+      "fixture installs plugins into an isolated container HOME"
+    ],
+    "secretNames": [
+      "OPENCODE_PASSWORD"
+    ],
+    "approved": false,
+    "note": "starting the environment does not approve the product"
   },
   "differencesFromProduction": [
     "macOS client controls the local Docker Desktop Linux VM",

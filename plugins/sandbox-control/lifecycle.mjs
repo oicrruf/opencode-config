@@ -13,8 +13,8 @@
 // The Docker calls are injectable so the lifecycle can be tested
 // without an engine.
 
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { randomUUID, createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync, unlinkSync, rmdirSync } from "node:fs";
 import { join, relative, resolve, sep, isAbsolute } from "node:path";
 import { acquireReservation, releaseReservation, verifyOwner, readReservation } from "./reservation.mjs";
 import { takeCapture, prepareIndependentRepository } from "./sandbox-capture.mjs";
@@ -26,10 +26,11 @@ import {
   labelArguments,
   LABEL_KEY,
 } from "./docker-adapter.mjs";
-import { ensureDir, reportDir, captureRootDir } from "./paths.mjs";
+import { ensureDir, reportDir, captureRootDir, resolveRepositoryRoot } from "./paths.mjs";
 import { screenValue } from "./secret-screen.mjs";
 
 import { inspectLocalEngine, boundDocker } from "./engine.mjs";
+import { armSupervisor, disarmSupervisor } from "./execution.mjs";
 
 export const RESULT_STATES = ["passed", "failed", "blocked", "not executed"];
 
@@ -65,6 +66,9 @@ export function buildExecutionIdentity(workId, workName) {
  * The directory that holds the record of an execution.
  */
 export function executionDir(cwd, executionId) {
+  if (typeof executionId !== "string" || !/^[a-z0-9-]+$/i.test(executionId)) {
+    return { ok: false, reason: "the execution identity is invalid" };
+  }
   const root = captureRootDir(cwd);
   if (!root.ok) return { ok: false, reason: root.reason };
   return { ok: true, dir: join(root.dir, "..", "executions", executionId) };
@@ -124,6 +128,9 @@ export async function startSandbox(input, deps = {}) {
 
   if (!workId) return { ok: false, reason: "the start needs a work identifier" };
   if (!worktreePath) return { ok: false, reason: "the start needs a worktree path" };
+  if (maxDurationSeconds !== null && (!Number.isFinite(maxDurationSeconds) || maxDurationSeconds <= 0)) {
+    return { ok: false, reason: "the maximum duration must be a positive finite number of seconds" };
+  }
 
   const engine = inspectLocalEngine(deps);
   if (!engine.ok) return engine;
@@ -153,10 +160,16 @@ export async function startSandbox(input, deps = {}) {
 
   // The quota is one per project and covers both the application and
   // the sandbox, so the reservation is taken before anything is built.
+  const identity = buildExecutionIdentity(workId, workName);
+  const deadlineAt = maxDurationSeconds
+    ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString()
+    : null;
   const acquired = acquireReservation(cwd, {
     workId,
     workName,
     scope: "sandbox",
+    executionId: identity.executionId,
+    deadlineAt,
     supervisorPid: String(process.pid),
     sessionId,
     executable: null,
@@ -165,7 +178,6 @@ export async function startSandbox(input, deps = {}) {
     return { ok: false, blocked: true, reason: acquired.reason, heldBy: acquired.heldBy };
   }
 
-  const identity = buildExecutionIdentity(workId, workName);
   const record = {
     ...identity,
     engine: engine.binding,
@@ -180,10 +192,17 @@ export async function startSandbox(input, deps = {}) {
     resources: { containers: [], images: [], networks: [], volumes: [] },
     secretNames: [],
     reportPath: null,
-    deadlineAt: maxDurationSeconds
-      ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString()
-      : null,
+    deadlineAt,
   };
+
+  // Persist the recovery identity before creating capture or secret state.
+  // Any later preflight failure can then be recovered through the same
+  // token-checked execution path if safe cleanup cannot be verified.
+  const initialRecord = writeExecutionRecord(cwd, record);
+  if (!initialRecord.ok) {
+    const released = releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
+    return { ok: false, reason: initialRecord.reason, phase: "record", quotaReleased: released.ok, ...(!released.ok ? { executionId: identity.executionId, token: acquired.token } : {}) };
+  }
 
   const capture = takeCapture({
     worktreePath,
@@ -194,8 +213,7 @@ export async function startSandbox(input, deps = {}) {
     include: config.config.include,
   });
   if (!capture.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
-    return { ok: false, reason: capture.reason, refused: capture.refused, refusals: capture.refusals };
+    return failBeforeResources(capture.reason, "capture", capture.refused, capture.refusals);
   }
   record.capture = {
     destination: capture.destination,
@@ -204,8 +222,7 @@ export async function startSandbox(input, deps = {}) {
 
   const secrets = writeSecretFile(cwd, identity.executionId, config.config.testSecrets);
   if (!secrets.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
-    return { ok: false, reason: secrets.reason };
+    return failBeforeResources(secrets.reason, "secrets");
   }
   record.secretNames = secrets.names;
 
@@ -216,13 +233,11 @@ export async function startSandbox(input, deps = {}) {
   // otherwise use a different file than the project declared.
   const mappedDockerfile = relativeToCapture(capture.destination, config.config.dockerfileRelative, projectRoot);
   if (!mappedDockerfile.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
-    return { ok: false, reason: mappedDockerfile.reason };
+    return failBeforeResources(mappedDockerfile.reason, "dockerfile");
   }
   const mappedContext = relativeToCapture(capture.destination, config.config.contextRelative, projectRoot);
   if (!mappedContext.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
-    return { ok: false, reason: mappedContext.reason };
+    return failBeforeResources(mappedContext.reason, "context");
   }
 
   const build = buildBuildArguments({
@@ -236,8 +251,7 @@ export async function startSandbox(input, deps = {}) {
     limits: config.config.limits,
   });
   if (!build.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
-    return { ok: false, reason: build.reason };
+    return failBeforeResources(build.reason, "build arguments");
   }
 
   // The record is persisted before the first resource is created, so a
@@ -247,12 +261,43 @@ export async function startSandbox(input, deps = {}) {
   record.phase = "building";
   const persisted = writeExecutionRecord(cwd, record);
   if (!persisted.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
+    const cleanup = removePreflightState();
+    const released = cleanup.ok ? releaseReservation(cwd, acquired.token, { resourcesAbsent: true }) : { ok: false };
     return {
       ok: false,
       reason: persisted.reason,
       phase: "record",
-      quotaReleased: true,
+      quotaReleased: released.ok,
+      resourcesKept: !released.ok,
+      ...(!released.ok ? { executionId: identity.executionId, token: acquired.token } : {}),
+    };
+  }
+
+  function removePreflightState() {
+    try {
+      // Keep the durable execution record until the capture is confirmed gone.
+      const captureSegments = [".opencode", "state", "sandbox", "captures", identity.executionId];
+      const capturePath = verifyManagedPath(cwd, captureSegments);
+      if (!capturePath.ok) throw new Error(capturePath.reason);
+      removeManagedTree(cwd, captureSegments);
+      if (existsSync(capturePath.path)) throw new Error("the capture still exists after preflight cleanup");
+
+      const executionSegments = [".opencode", "state", "sandbox", "executions", identity.executionId];
+      const executionPath = verifyManagedPath(cwd, executionSegments);
+      if (!executionPath.ok) throw new Error(executionPath.reason);
+      removeManagedTree(cwd, executionSegments);
+      if (existsSync(executionPath.path)) throw new Error("the execution record still exists after preflight cleanup");
+      return { ok: true };
+    } catch (error) { return { ok: false, reason: error.message }; }
+  }
+
+  function failBeforeResources(reason, phase, refused, refusals) {
+    const cleanup = removePreflightState();
+    const released = cleanup.ok ? releaseReservation(cwd, acquired.token, { resourcesAbsent: true }) : { ok: false };
+    return {
+      ok: false, reason, phase, quotaReleased: released.ok, resourcesKept: !released.ok,
+      ...(refused ? { refused } : {}), ...(refusals ? { refusals } : {}),
+      ...(!released.ok ? { executionId: identity.executionId, token: acquired.token } : {}),
     };
   }
 
@@ -261,7 +306,10 @@ export async function startSandbox(input, deps = {}) {
   // after the labeled cleanup has verified their absence.
   const abandon = (reason, phase) => {
     const evidence = preserveClosure(cwd, record, `start failed in ${phase ?? record.phase}`);
-    if (!evidence.ok) return { ok: false, phase, reason: evidence.reason, quotaReleased: false, resourcesKept: true };
+    if (!evidence.ok) return {
+      ok: false, phase, reason: evidence.reason, quotaReleased: false, resourcesKept: true,
+      executionId: identity.executionId, token: acquired.token,
+    };
     const cleanup = cleanupExecution(cwd, identity.executionId, deps);
     let quotaReleased = false;
     if (cleanup.ok) {
@@ -279,6 +327,7 @@ export async function startSandbox(input, deps = {}) {
       quotaReleased,
       resourcesKept: !cleanup.ok,
       remaining: cleanup.remaining ?? [],
+      ...(!quotaReleased ? { executionId: identity.executionId, token: acquired.token } : {}),
     };
   };
 
@@ -333,6 +382,17 @@ export async function startSandbox(input, deps = {}) {
 
   record.phase = "running";
   writeExecutionRecord(cwd, record);
+
+  if (record.deadlineAt) {
+    const supervisor = await armSupervisor(cwd, {
+      executionId: identity.executionId,
+      workId,
+      workName,
+      deadlineAt: record.deadlineAt,
+      token: acquired.token,
+    }, { spawn: deps.supervisorSpawn });
+    if (!supervisor.ok) return abandon(supervisor.reason, "supervisor");
+  }
 
   return {
     ok: true,
@@ -534,6 +594,7 @@ export function finishSandbox(cwd, executionId, input, deps = {}) {
   // complete keeps the block.
   let quotaReleased = false;
   if (cleanup.ok && token) {
+    disarmSupervisor(cwd);
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {
@@ -577,25 +638,30 @@ export function buildReport(record, input) {
   const { result, steps, differencesFromProduction } = input;
   const problems = [];
   const safeSteps = [];
-  for (const step of steps ?? []) {
-    const reason = screenValue(typeof step === "string" ? step : JSON.stringify(step));
-    if (reason) {
-      problems.push({ step, reason });
-      continue;
+  const safeDifferences = [];
+  const screenReportValues = (values, label, safeValues) => {
+    for (const [index, value] of (Array.isArray(values) ? values : []).entries()) {
+      let serialized;
+      try { serialized = typeof value === "string" ? value : JSON.stringify(value); }
+      catch { problems.push({ field: label, index, reason: "value could not be serialized" }); continue; }
+      const reason = screenValue(serialized);
+      if (reason) problems.push({ field: label, index, reason });
+      else safeValues.push(value);
     }
-    safeSteps.push(step);
-  }
+  };
+  screenReportValues(steps, "steps", safeSteps);
+  screenReportValues(differencesFromProduction, "differencesFromProduction", safeDifferences);
+  const resultReason = screenValue(String(result ?? ""));
+  if (resultReason) problems.push({ field: "result", reason: resultReason });
   if (problems.length > 0) {
     return {
       ok: false,
-      reason: `the report was refused: ${problems.length} step(s) contain a credential-shaped value`,
+      reason: `the report was refused: ${problems.length} caller-supplied value(s) contain a credential-shaped value or cannot be serialized`,
       problems,
     };
   }
 
-  return {
-    ok: true,
-    report: {
+  const report = {
       version: 1,
       result,
       executionId: record.executionId,
@@ -614,21 +680,27 @@ export function buildReport(record, input) {
       container: record.container,
       network: record.network,
       steps: safeSteps,
-      differencesFromProduction: differencesFromProduction ?? [],
+      differencesFromProduction: safeDifferences,
       secretNames: record.secretNames,
       approved: false,
       note: "starting the environment does not approve the product",
-    },
   };
+  let serialized;
+  try { serialized = JSON.stringify(report); }
+  catch { return { ok: false, reason: "the report was refused: caller-supplied values could not be serialized" }; }
+  if (screenValue(serialized)) {
+    return { ok: false, reason: "the report was refused: a caller-supplied value contains a credential-shaped value" };
+  }
+  return { ok: true, report };
 }
 
 function captureFingerprint(record) {
   const files = record.capture?.manifest?.files ?? [];
   const hash = files
-    .map((file) => `${file.path}:${file.fingerprint ?? "link"}`)
+    .map((file) => `${file.path}:${file.kind === "symlink" ? `symlink:${file.target}` : `file:${file.fingerprint ?? "unknown"}`}`)
     .sort()
     .join("\n");
-  return hash.length > 0 ? hash.length : 0;
+  return createHash("sha256").update(hash).digest("hex");
 }
 
 /**
@@ -746,18 +818,83 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
     };
   }
 
-  // The capture and the secret file belong to the execution too.
-  const dir = executionDir(cwd, executionId);
-  if (dir.ok) {
+  // Remove the capture before its recovery record. If capture cleanup is
+  // blocked, the durable record and token-checked recovery path remain.
+  const captureRoot = captureRootDir(cwd);
+  const expectedCapture = captureRoot.ok ? join(captureRoot.dir, executionId) : null;
+  const recordedCapture = record.record.capture?.destination;
+  const verifiedCapture = verifyManagedPath(cwd, [".opencode", "state", "sandbox", "captures", executionId]);
+  if (!captureRoot.ok || !verifiedCapture.ok || resolve(verifiedCapture.path) !== resolve(expectedCapture) || typeof recordedCapture !== "string" || resolve(recordedCapture) !== resolve(expectedCapture)) {
+    remaining.push({ kind: "capture", reason: verifiedCapture.reason ?? "the recorded capture path is not the execution's verified capture path" });
+  } else {
     try {
-      rmSync(dir.dir, { recursive: true, force: true });
-    } catch {
-      // A capture that cannot be removed is reported through the
-      // remaining resources.
+      if (existsSync(expectedCapture)) {
+        if (lstatSync(expectedCapture).isSymbolicLink()) throw new Error("the capture path is a symbolic link");
+        rmSync(expectedCapture, { recursive: true, force: false });
+      }
+      if (existsSync(expectedCapture)) throw new Error("the capture still exists after removal");
+    } catch (error) {
+      remaining.push({ kind: "capture", reason: `the capture could not be removed and verified: ${error.message}` });
     }
   }
+  if (remaining.length > 0) {
+    return { ok: false, reason: "the resources of the execution are still present", removed, remaining };
+  }
+
+  const dir = executionDir(cwd, executionId);
+  if (dir.ok) {
+    const verified = verifyManagedPath(cwd, [".opencode", "state", "sandbox", "executions", executionId]);
+    try {
+      if (!verified.ok || resolve(verified.path) !== resolve(dir.dir)) throw new Error(verified.reason ?? "the execution path does not match the managed root");
+      removeManagedTree(cwd, [".opencode", "state", "sandbox", "executions", executionId]);
+      if (existsSync(dir.dir)) throw new Error("the execution directory still exists after removal");
+    } catch (error) {
+      remaining.push({ kind: "execution", reason: `the execution directory could not be removed and verified: ${error.message}` });
+    }
+  } else remaining.push({ kind: "execution", reason: dir.reason });
+
+  if (remaining.length > 0) return { ok: false, reason: "the resources of the execution are still present", removed, remaining };
 
   return { ok: true, removed, remaining: [] };
+}
+
+function removeManagedTree(cwd, segments) {
+  const checked = verifyManagedPath(cwd, segments);
+  if (!checked.ok) throw new Error(checked.reason);
+  const path = checked.path;
+  if (!existsSync(path)) return;
+  const rootStat = lstatSync(path);
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new Error("managed execution directory changed during cleanup");
+  for (const entry of readdirSync(path, { withFileTypes: true })) {
+    const childSegments = [...segments, entry.name];
+    const parent = verifyManagedPath(cwd, segments);
+    if (!parent.ok) throw new Error(parent.reason);
+    const childPath = join(parent.path, entry.name);
+    const stat = lstatSync(childPath);
+    if (stat.isDirectory() && !stat.isSymbolicLink()) removeManagedTree(cwd, childSegments);
+    else unlinkSync(childPath);
+  }
+  const parent = verifyManagedPath(cwd, segments.slice(0, -1));
+  if (!parent.ok) throw new Error(parent.reason);
+  rmdirSync(path);
+}
+
+function verifyManagedPath(cwd, segments) {
+  const repository = resolveRepositoryRoot(cwd);
+  if (!repository.ok) return { ok: false, reason: repository.reason };
+  let path = repository.root;
+  for (const [index, segment] of segments.entries()) {
+    path = join(path, segment);
+    try {
+      const stat = lstatSync(path);
+      if (stat.isSymbolicLink()) return { ok: false, reason: `a managed state path is a symbolic link: ${segment}` };
+      if (index < segments.length - 1 && !stat.isDirectory()) return { ok: false, reason: `a managed state path is not a directory: ${segment}` };
+    } catch (error) {
+      if (error.code === "ENOENT") return { ok: true, path };
+      return { ok: false, reason: `a managed state path could not be verified: ${error.message}` };
+    }
+  }
+  return { ok: true, path };
 }
 
 function preserveClosure(cwd, record, reason) {
@@ -826,6 +963,7 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
   // verified.
   let quotaReleased = false;
   if (token) {
+    disarmSupervisor(cwd);
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {
@@ -912,6 +1050,7 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
   // verified.
   let quotaReleased = false;
   if (token) {
+    disarmSupervisor(cwd);
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {

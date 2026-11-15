@@ -22,6 +22,9 @@ import {
 import { readSandboxConfig } from "./sandbox-config.mjs";
 import { inspectLocalEngine } from "./engine.mjs";
 import { registerV2Tools } from "../plugin-v2-adapter.mjs";
+import { listWorktrees } from "../worktree-control/creation.mjs";
+import { reconcileInventory } from "../worktree-control/inventory.mjs";
+import { resolveProjectRoot } from "../worktree-control/paths.mjs";
 
 const SANDBOX_DESCRIPTION =
   "Build and test an independent capture of the work under test in an isolated local Docker container. " +
@@ -36,6 +39,20 @@ const RESERVATION_DESCRIPTION =
 
 function currentWorktree() {
   return process.cwd();
+}
+
+async function managedWorktreeApi(api, cwd) {
+  return {
+    async list() {
+      const project = resolveProjectRoot(cwd);
+      if (!project.ok) throw new Error(project.reason);
+      const listing = await listWorktrees(api, cwd);
+      if (!listing.verified) throw new Error(listing.reason ?? "the V2 worktree listing is unverified");
+      const inventory = reconcileInventory(project.root, listing.worktrees, { verified: true });
+      if (!inventory.ok) throw new Error(inventory.reason);
+      return inventory.present;
+    },
+  };
 }
 
 /**
@@ -151,12 +168,14 @@ export const SandboxControlPlugin = async () => {
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
+          const worktreeApi = context?.worktree ? await managedWorktreeApi(context.worktree, cwd) : null;
           return startLocalExecution(cwd, {
             workId: args?.workId,
             workName: args?.workName,
             executable: args?.executable,
             args: args?.args ?? [],
             cwd: args?.cwd,
+            worktreeApi,
           });
         },
       },
@@ -184,8 +203,6 @@ export const SandboxControlPlugin = async () => {
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
           return recoverReservation(cwd, {
-            ownerEnded: true,
-            groupHasProcesses: false,
             token: args?.token,
           });
         },
@@ -240,7 +257,7 @@ export const SandboxControlPlugin = async () => {
 export default {
   id: "opencode-config.sandbox-control",
   async setup(ctx) {
-    return registerV2Tools(ctx, "opencode-config.sandbox-control", SandboxControlPlugin);
+    return registerV2Tools(ctx, "opencode-config.sandbox-control", SandboxControlPlugin, { worktree: true });
   },
 };
 

@@ -11,13 +11,13 @@
   `515235fa31360b952a0f500ba2ebcbaf48ee8de62f252cb27104a88a12a04ddf`; the
   fixture adds only its local runtime verifier. Control entrypoints use the
   same flat file layout recorded by the resource inventory.
-- Runtime execution `at188-v2-runtime-1a8c22f2`: `ctx.tool.list()` returned every expected
+- Runtime execution `at188-v2-runtime-b133b7cc`: `ctx.tool.list()` returned every expected
   sandbox-control and worktree-control tool ID exactly once (17/17). The
   runtime verifier waits for the asynchronous plugin activation before
   recording the final list.
-- Capture: 28 files, independent from the source fixture; fixture fingerprint
-  `996f446937aac4ccef7188a55030c29b2707b1f6c3a6f9ef2183de0c2189b85d`, capture
-  fingerprint `963521cf9647d26997659509bab1f4c9ff29efd1278785d59259d2889eee80b2`.
+- Capture: 29 files, independent from the source fixture; fixture fingerprint
+  `0782b931997d99ceb6e544915f121e469db65275ec11449372bebc3855d495df`, capture
+  fingerprint `5f26bb8155a99fa4e606e7d722a5b8a4203c26ff9e375c597bbf8bd494f5c411`.
 - Isolation: internal network, no published ports, no mounts, no added
   privileges, all capabilities dropped, `no-new-privileges`, 1 CPU,
   512 MiB memory, and 64 PID limit. A concurrent second start was refused.
@@ -28,9 +28,14 @@
   identity and required argument schema) resolved; no material findings
   remain. The real runtime probe verifies registration, while tool execution
   paths are covered by unit tests rather than a model-driven session.
-- Difference from Linux-native use: the client selected and controlled the
-  Docker Desktop Linux VM from macOS; OpenCode itself ran inside that Linux
-  container.
+- Platform coverage: macOS arm64 with Docker Desktop was exercised end to end.
+  Linux endpoint selection and socket validation are covered by focused tests;
+  an end-to-end run from a Linux host was not available in this environment.
+  OpenCode itself ran in the Linux arm64 container in the runtime probe.
+- The fixture has no model provider credentials by design. The attempted
+  model completion was unavailable; the result verifies OpenCode V2 plugin
+  initialization and the public runtime tool listing, not model response
+  behavior. Tool execution paths are exercised by the focused tests.
 
 ## Repository gates
 

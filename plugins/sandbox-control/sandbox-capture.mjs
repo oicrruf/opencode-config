@@ -29,6 +29,7 @@ import {
   readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
   chmodSync,
 } from "node:fs";
@@ -38,9 +39,8 @@ import { captureRootDir, ensureDir, isInside, canonicalPath } from "./paths.mjs"
 import { screenCapturedFiles } from "./secret-screen.mjs";
 
 /**
- * The paths that are excluded from a capture by default. The list is a
- * deny list with a default-on posture: a new secret file is excluded
- * before anyone remembers to add it, not after.
+ * The paths that are always excluded from a capture. A declared include
+ * cannot override these protected categories.
  */
 export const DEFAULT_EXCLUSIONS = [
   { kind: "environment", matches: (rel) => /(^|\/)\.env(\..+)?$/.test(rel) || rel === ".env" },
@@ -57,18 +57,17 @@ export const DEFAULT_EXCLUSIONS = [
 /**
  * Decide whether a relative path is excluded.
  *
- * A path is excluded unless the declared configuration includes it
- * explicitly, so the deny list is the default and the inclusion is the
- * exception that has to be declared.
+ * Protected exclusions are checked first and cannot be overridden by
+ * declared include paths. Includes only document additional project paths.
  */
 export function isExcluded(relPath, include = []) {
   const rel = relPath.split(sep).join("/");
+  for (const rule of DEFAULT_EXCLUSIONS) {
+    if (rule.matches(rel)) return { excluded: true, kind: rule.kind };
+  }
   for (const declared of include) {
     const pattern = String(declared).split(sep).join("/");
     if (rel === pattern || rel.startsWith(`${pattern}/`)) return { excluded: false, kind: null };
-  }
-  for (const rule of DEFAULT_EXCLUSIONS) {
-    if (rule.matches(rel)) return { excluded: true, kind: rule.kind };
   }
   return { excluded: false, kind: null };
 }
@@ -217,17 +216,29 @@ export function takeCapture(input) {
     const target = join(destination, file.rel);
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     if (file.kind === "symlink") {
-      // A link that stays inside the source is reproduced as a link to
-      // the copied target, not as a link to the original path.
       const linkTarget = resolve(dirname(source), file.target);
-      const copiedTarget = join(destination, relative(root, linkTarget));
       try {
-        cpSync(copiedTarget, target, { recursive: true });
-      } catch {
-        // A link whose target was not captured is dropped rather than
-        // replaced by a broken copy.
+        const targetRel = relative(root, linkTarget).split(sep).join("/");
+        const targetDecision = isExcluded(targetRel, include);
+        if (targetDecision.excluded) {
+          throw new Error(`the symbolic link ${file.rel} points to an excluded path`);
+        }
+        const sourceTargetExists = existsSync(linkTarget);
+        if (sourceTargetExists && statSync(linkTarget).isDirectory()) {
+          mkdirSync(join(destination, targetRel), { recursive: true, mode: 0o700 });
+        }
+        const captureTarget = join(destination, targetRel);
+        const relativeTarget = relative(dirname(target), captureTarget) || ".";
+        symlinkSync(relativeTarget, target);
+      } catch (err) {
+        rmSync(destination, { recursive: true, force: true });
+        return {
+          ok: false,
+          reason: `the capture was refused: the symbolic link ${file.rel} could not be preserved (${err.message})`,
+          refused: file.rel,
+        };
       }
-      manifestFiles.push({ path: file.rel, kind: "symlink", fingerprint: null });
+      manifestFiles.push({ path: file.rel, kind: "symlink", target: file.target, fingerprint: null });
       continue;
     }
     cpSync(source, target, { preserveTimestamps: true });

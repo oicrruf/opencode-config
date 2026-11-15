@@ -224,21 +224,44 @@ test("the recovery proceeds only on a confirmed owner and an empty group", () =>
     assert.equal(confirmed.recoverable, true);
 
     const wrongToken = recoverReservation(dir, {
-      ownerEnded: true,
-      groupHasProcesses: false,
       token: "wrong",
-    });
+    }, { inspectOwner: () => ({ ok: true, ended: true }), listProcesses: () => [] });
     assert.equal(wrongToken.ok, false);
     assert.equal(readReservation(dir).state, "held");
 
     const released = recoverReservation(dir, {
-      ownerEnded: true,
-      groupHasProcesses: false,
       token: acquired.token,
-    });
+    }, { inspectOwner: () => ({ ok: true, ended: true }), listProcesses: () => [] });
     assert.equal(released.ok, true);
     assert.equal(released.recoveredFrom, "work-1");
     assert.equal(readReservation(dir).state, "free");
+  });
+});
+
+test("recovery inspects owner and process group and refuses generic sandbox release", () => {
+  withTempRepo((dir) => {
+    const acquired = acquireReservation(dir, { workId: "work-1", processGroup: 4242 });
+    const liveOwner = recoverReservation(dir, { token: acquired.token }, { listProcesses: () => [] });
+    assert.equal(liveOwner.released, false);
+    assert.equal(readReservation(dir).state, "held");
+    const activeOwner = recoverReservation(dir, { token: acquired.token }, {
+      inspectOwner: () => ({ ok: true, ended: false }), listProcesses: () => [],
+    });
+    assert.equal(activeOwner.released, false);
+    assert.equal(readReservation(dir).state, "held");
+    const runningGroup = recoverReservation(dir, { token: acquired.token }, {
+      inspectOwner: () => ({ ok: true, ended: true }), listProcesses: () => [{ pid: 7, pgid: 4242 }],
+    });
+    assert.equal(runningGroup.released, false);
+    assert.equal(readReservation(dir).state, "held");
+    releaseReservation(dir, acquired.token, { resourcesAbsent: true });
+
+    const sandbox = acquireReservation(dir, { workId: "sandbox", scope: "sandbox", executionId: "exec-1" });
+    assert.equal(sandbox.ok, true);
+    const generic = recoverReservation(dir, { token: sandbox.token });
+    assert.equal(generic.released, false);
+    assert.match(generic.reason, /sandbox_recover/);
+    assert.equal(readReservation(dir).state, "held");
   });
 });
 
@@ -250,6 +273,12 @@ test("the worktree confirmation reports a missing work", async () => {
   const unavailable = await confirmManagedWorktree(null, "work-1");
   assert.equal(unavailable.ok, false);
   assert.match(unavailable.reason, /not available/);
+
+  const adapted = await confirmManagedWorktree({ list: async () => ({ data: [
+    { workId: "work-1", exists: true, directory: "/tmp/work-1" },
+  ] }) }, "work-1");
+  assert.equal(adapted.ok, true);
+  assert.equal(adapted.worktree.directory, "/tmp/work-1");
 });
 
 test("the verification of a presented token never leaks the token", () => {

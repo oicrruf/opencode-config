@@ -13,6 +13,7 @@
 // rules can be tested without launching a real application.
 
 import { spawn, execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -48,7 +49,8 @@ export async function confirmManagedWorktree(worktreeApi, workId) {
   } catch (err) {
     return { ok: false, reason: `the managed worktrees could not be listed: ${err.message}` };
   }
-  const match = (entries ?? []).find((entry) => entry?.workId === workId && entry?.exists !== false);
+  const data = entries?.data ?? entries;
+  const match = (Array.isArray(data) ? data : []).find((entry) => entry?.workId === workId && entry?.exists === true && typeof entry?.directory === "string");
   if (!match) {
     return { ok: false, reason: `the work ${workId} has no managed worktree` };
   }
@@ -248,7 +250,7 @@ export function inspectProcessGroup(processGroup, deps = {}) {
  * reports that the state is unknown.
  */
 function defaultListProcesses(processGroup) {
-  if (process.platform === "win32") return [];
+  if (process.platform === "win32") throw new Error("process-group inspection is unavailable on this platform");
   // `ps` reports the process group as PGID. The listing is the honest
   // source: when the platform cannot answer, the caller is told that the
   // state is unknown rather than that the group is empty.
@@ -366,16 +368,23 @@ export function evaluateAmbiguity(cwd, input = {}) {
  * and its group is empty, and it records the reservation it acted on so
  * a retry does not release a different one.
  */
-export function recoverReservation(cwd, input = {}) {
-  const { ownerEnded = null, groupHasProcesses = null, groupStateKnown = true, token = null } = input;
-
-  const decision = evaluateRecovery(cwd, { ownerEnded, groupHasProcesses, groupStateKnown });
+export function recoverReservation(cwd, input = {}, deps = {}) {
+  const { token = null } = input;
+  const current = readReservation(cwd);
+  if (!current.ok || current.state !== "held") return { ok: false, released: false, reason: current.reason ?? "there is no held reservation" };
+  const reservation = current.reservation;
+  if (reservation.scope === "sandbox") {
+    return { ok: false, released: false, reason: `sandbox reservations require sandbox_recover for execution ${reservation.executionId ?? "with its recorded execution identity"}` };
+  }
+  const owner = (deps.inspectOwner ?? inspectOwner)(reservation);
+  if (!owner.ok) return { ok: false, released: false, reason: owner.reason };
+  const group = inspectProcessGroup(reservation.processGroup, deps);
+  const decision = evaluateRecovery(cwd, { ownerEnded: owner.ended, groupHasProcesses: group.hasProcesses, groupStateKnown: group.ok });
   if (!decision.ok) return { ok: false, released: false, reason: decision.reason };
   if (!decision.recoverable) {
     return { ok: false, released: false, reason: decision.reason };
   }
 
-  const reservation = decision.reservation;
   if (!token || !tokenMatchesForReservation(token, reservation)) {
     return {
       ok: false,
@@ -403,27 +412,43 @@ function tokenMatchesForReservation(token, reservation) {
  * not take the watch with it. Its state is persisted next to the
  * reservation.
  */
-export function armSupervisor(cwd, input) {
-  const { workId, workName, processGroup, deadlineAt = null, tokenId } = input ?? {};
+export async function armSupervisor(cwd, input, deps = {}) {
+  const { workId, workName, processGroup, deadlineAt = null, tokenId, executionId, token } = input ?? {};
   const dir = reservationDir(cwd);
   if (!dir.ok) return { ok: false, reason: dir.reason };
   const ensured = ensureDir(dir.dir);
   if (!ensured.ok) return { ok: false, reason: ensured.reason };
 
   const path = join(dir.dir, SUPERVISOR_FILE);
+  if (existsSync(path)) return { ok: false, reason: "a deadline supervisor record already exists for this project" };
   const state = {
     workId,
     workName,
     processGroup,
+    executionId,
     deadlineAt,
     tokenId,
-    supervisorPid: String(process.pid),
+    supervisorPid: null,
     armedAt: new Date().toISOString(),
     nonce: randomBytes(8).toString("hex"),
   };
+  if (!deadlineAt || !executionId || !token) return { ok: false, reason: "a deadline, execution identity, and owner token are required" };
+  const spawnFn = deps.spawn ?? spawn;
+  const helper = fileURLToPath(new URL("./deadline-supervisor.mjs", import.meta.url));
+  let child;
   try {
+    child = spawnFn(process.execPath, [helper], {
+      cwd: process.cwd(), detached: true, stdio: ["pipe", "ignore", "ignore"], windowsHide: true,
+    });
+    if (!child?.pid || !child.stdin) throw new Error("the detached helper did not start");
+    const launch = await waitForLaunch(child, 1000);
+    if (!launch.ok) throw new Error(launch.reason);
+    state.supervisorPid = String(child.pid);
     writeFileSync(path, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+    child.stdin.end(JSON.stringify({ cwd, executionId, deadlineAt, token, supervisorPath: path }));
+    child.unref?.();
   } catch (err) {
+    try { child?.kill?.(); } catch { /* best-effort cleanup of an unarmed helper */ }
     return { ok: false, reason: `the supervisor could not be armed: ${err.message}` };
   }
   return { ok: true, supervisor: state, path };
@@ -457,4 +482,28 @@ export function disarmSupervisor(cwd) {
     // A supervisor that was never armed is already disarmed.
   }
   return { ok: true };
+}
+
+function inspectOwner(reservation) {
+  if (!reservation?.supervisorPid || !reservation.ownerStartIdentity) {
+    return { ok: false, ended: null, reason: "the recorded owner identity is incomplete; recovery is blocked" };
+  }
+  if (process.platform === "win32") {
+    return { ok: false, ended: null, reason: "the owner process identity cannot be verified on this platform" };
+  }
+  const pid = Number(reservation.supervisorPid);
+  if (!Number.isSafeInteger(pid) || pid <= 0) return { ok: false, ended: null, reason: "the recorded owner PID is invalid" };
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error.code === "ESRCH") return { ok: true, ended: true };
+    return { ok: false, ended: null, reason: `the recorded owner process could not be inspected: ${error.message}` };
+  }
+  try {
+    const observed = execFileSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    if (!observed) return { ok: false, ended: null, reason: "the recorded owner process identity could not be verified" };
+    return { ok: true, ended: observed !== reservation.ownerStartIdentity };
+  } catch (error) {
+    return { ok: false, ended: null, reason: `the recorded owner process could not be inspected: ${error.message}` };
+  }
 }

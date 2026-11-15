@@ -15,6 +15,7 @@
 // without a running application.
 
 import { randomBytes, timingSafeEqual, scryptSync } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   readFileSync,
   writeFileSync,
@@ -153,6 +154,9 @@ export function acquireReservation(cwd, input) {
     sessionId = "",
     executable = null,
     processGroup = null,
+    executionId = null,
+    deadlineAt = null,
+    ownerStartIdentity = processStartIdentity(supervisorPid),
   } = input ?? {};
 
   if (!workId || typeof workId !== "string") {
@@ -174,6 +178,9 @@ export function acquireReservation(cwd, input) {
     ownerHash: deriveTokenVerifier(token, salt),
     ownerSalt: salt,
     supervisorPid,
+    ownerStartIdentity,
+    executionId,
+    deadlineAt,
     startedAt: new Date().toISOString(),
     processGroup,
     sessionId,
@@ -228,6 +235,17 @@ export function acquireReservation(cwd, input) {
   }
 
   return { ok: true, reservation: record, token };
+}
+
+function processStartIdentity(pid) {
+  if (process.platform === "win32") return null;
+  try {
+    return execFileSync("ps", ["-p", String(pid), "-o", "lstart="], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

@@ -18,9 +18,10 @@
 //      other execution.
 
 import { test } from "node:test";
+import { EventEmitter } from "node:events";
 import { withEngineStub } from "./engine-fixture.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -36,8 +37,10 @@ const {
   readExecutionRecord,
   normalizeWorkName,
   buildExecutionIdentity,
+  buildReport,
 } = await import("../lifecycle.mjs");
 const { readReservation } = await import("../reservation.mjs");
+const { readSupervisor } = await import("../execution.mjs");
 
 function withRepo(run) {
   const dir = mkdtempSync(join(tmpdir(), "sandbox-lifecycle-"));
@@ -72,7 +75,18 @@ function prepareProject(dir, { include = [] } = {}) {
       include,
     }),
   );
-  if (include.includes("opencode.json")) writeFileSync(join(dir, "opencode.json"), '{"plugins":[]}\n');
+  if (include.includes("custom-config.json")) writeFileSync(join(dir, "custom-config.json"), '{"featureFlag":true}\n');
+}
+
+function supervisorSpawnStub() {
+  const child = new EventEmitter();
+  child.pid = 987654;
+  child.payload = "";
+  child.stdin = { end(value) { child.payload = value; } };
+  child.unref = () => {};
+  child.kill = () => {};
+  queueMicrotask(() => child.emit("spawn"));
+  return child;
 }
 
 // A Docker stub that records the calls it received and reports the
@@ -171,13 +185,13 @@ test("the start returns a pending manual test and a distinct identity", async ()
 
 test("the declared capture include is honored during a sandbox start", async () => {
   await withRepo(async (dir) => {
-    prepareProject(dir, { include: ["opencode.json"] });
+    prepareProject(dir, { include: ["custom-config.json"] });
     const result = await startSandbox(
       { workId: "work-include", workName: "include", worktreePath: dir, cwd: dir },
       { ...dockerStub(), platform: "linux", release: "6.1.0" },
     );
     assert.equal(result.ok, true);
-    assert.equal(readFileSync(join(result.execution.capture.destination, "opencode.json"), "utf8"), '{"plugins":[]}\n');
+    assert.equal(readFileSync(join(result.execution.capture.destination, "custom-config.json"), "utf8"), '{"featureFlag":true}\n');
   });
 });
 
@@ -321,10 +335,35 @@ test("the cleanup removes only the labeled resources and verifies their absence"
     );
     const cleanup = cleanupExecution(dir, started.execution.executionId, docker);
     assert.equal(cleanup.ok, true);
+    assert.equal(existsSync(started.execution.capture.destination), false, "the recorded capture remained after cleanup");
     assert.ok(cleanup.removed.length > 0);
     for (const removal of cleanup.removed) {
       assert.ok(docker.calls.some((call) => call.includes(`label=${"com.opencode.sandbox.execution"}=`)));
       void removal;
+    }
+  });
+});
+
+test("cleanup refuses a capture path redirected through a symlink", async () => {
+  await withRepo(async (dir) => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const started = await startSandbox({ workId: "safe-path", workName: "safe-path", cwd: dir, worktreePath: dir }, docker);
+    const outside = mkdtempSync(join(tmpdir(), "sandbox-preserved-outside-"));
+    const sentinel = join(outside, "keep.txt");
+    writeFileSync(sentinel, "must survive cleanup\n");
+    rmSync(started.execution.capture.destination, { recursive: true, force: true });
+    symlinkSync(outside, started.execution.capture.destination, "dir");
+    try {
+      const closed = finishSandbox(dir, started.execution.executionId, { result: "passed", token: started.token }, docker);
+      assert.equal(closed.cleanup.ok, false);
+      assert.equal(closed.quotaReleased, false);
+      assert.equal(readFileSync(sentinel, "utf8"), "must survive cleanup\n");
+      assert.equal(readReservation(dir).state, "held");
+      assert.equal(readExecutionRecord(dir, started.execution.executionId).ok, true, "failed capture cleanup must retain its recovery record");
+    } finally {
+      rmSync(started.execution.capture.destination, { force: true });
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 });
@@ -515,8 +554,9 @@ test('an unreachable bound daemon preserves quota for cancel, recovery and expir
   await withRepo(async dir => {
     prepareProject(dir);
     const docker = dockerStub();
-    const started = await startSandbox({ workId: 'deadline', workName: 'deadline', cwd: dir, worktreePath: dir, maxDurationSeconds: -1 }, docker);
+    const started = await startSandbox({ workId: 'deadline', workName: 'deadline', cwd: dir, worktreePath: dir, maxDurationSeconds: 60 }, { ...docker, supervisorSpawn: supervisorSpawnStub });
     assert.equal(started.ok, true);
+    writeExecutionRecord(dir, { ...started.execution, deadlineAt: new Date(0).toISOString() });
     const unavailable = { ...docker, token: started.token, lstatSync() { throw new Error('unavailable'); } };
     for (const close of [
       () => cancelSandbox(dir, started.execution.executionId, { token: started.token }, unavailable),
@@ -530,6 +570,64 @@ test('an unreachable bound daemon preserves quota for cancel, recovery and expir
       assert.equal(readReservation(dir).state, 'held');
     }
   });
+});
+
+test("a deadline starts an independent helper without persisting its owner token", async () => {
+  await withRepo(async (dir) => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const started = await startSandbox(
+      { workId: "deadline", workName: "deadline", cwd: dir, worktreePath: dir, maxDurationSeconds: 60 },
+      { ...docker, supervisorSpawn: supervisorSpawnStub },
+    );
+    assert.equal(started.ok, true);
+    const state = readSupervisor(dir);
+    assert.equal(state.ok, true);
+    assert.equal(state.supervisor.executionId, started.execution.executionId);
+    assert.ok(state.supervisor.supervisorPid);
+    assert.equal(state.supervisor.token, undefined);
+    assert.ok(!JSON.stringify(state).includes(started.token));
+    const finished = finishSandbox(dir, started.execution.executionId, { result: "passed", token: started.token }, docker);
+    assert.equal(finished.quotaReleased, true);
+    assert.equal(readSupervisor(dir).supervisor, null);
+  });
+});
+
+test("failed starts return the token and identity while cleanup keeps the reservation", async () => {
+  await withRepo(async (dir) => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const execFileSync = (cmd, args, options) => {
+      if (args[0] === "build") throw new Error("fixture build failure");
+      if (args[0] === "ps") throw new Error("fixture engine outage");
+      return docker.execFileSync(cmd, args, options);
+    };
+    const started = await startSandbox(
+      { workId: "failed", workName: "failed", cwd: dir, worktreePath: dir },
+      { ...docker, execFileSync },
+    );
+    assert.equal(started.ok, false);
+    assert.equal(started.resourcesKept, true);
+    assert.ok(started.executionId);
+    assert.ok(started.token);
+    assert.equal(readReservation(dir).state, "held");
+  });
+});
+
+test("report screening covers caller supplied production differences and fingerprints file content", () => {
+  const record = { executionId: "exec", workId: "work", startedAt: new Date(0).toISOString(), capture: { manifest: { files: [{ path: "a.txt", fingerprint: "a" }] } } };
+  const refused = buildReport(record, { result: "passed", steps: [], differencesFromProduction: ['password="fixture-only-password-123"'] });
+  assert.equal(refused.ok, false);
+  assert.doesNotMatch(JSON.stringify(refused), /fixture-only-password-123/);
+  const first = buildReport(record, { result: "passed", steps: [], differencesFromProduction: [] });
+  const second = buildReport({ ...record, capture: { manifest: { files: [{ path: "a.txt", fingerprint: "b" }] } } }, { result: "passed", steps: [], differencesFromProduction: [] });
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.equal(first.report.capture.fingerprint.length, 64);
+  assert.notEqual(first.report.capture.fingerprint, second.report.capture.fingerprint);
+  const linkA = buildReport({ ...record, capture: { manifest: { files: [{ path: "inside", kind: "symlink", target: "a" }] } } }, { result: "passed", steps: [], differencesFromProduction: [] });
+  const linkB = buildReport({ ...record, capture: { manifest: { files: [{ path: "inside", kind: "symlink", target: "b" }] } } }, { result: "passed", steps: [], differencesFromProduction: [] });
+  assert.notEqual(linkA.report.capture.fingerprint, linkB.report.capture.fingerprint);
 });
 
 test('recover and cancel retain original runtime evidence after cleanup was blocked', async () => {

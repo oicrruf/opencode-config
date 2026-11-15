@@ -7,7 +7,7 @@ ENV HOME=/tmp/at188-home \
     OPENCODE_LOG_LEVEL=DEBUG
 
 WORKDIR /fixture
-COPY opencode.json /fixture/opencode.json
+COPY runtime-fixture.json /fixture/opencode.json
 COPY .opencode/plugins/ /fixture/.opencode/plugins/
 COPY runtime-probe/ /fixture/.opencode/plugins/runtime-probe/
 ENTRYPOINT ["opencode", "serve", "--hostname", "0.0.0.0", "--port", "8080"]

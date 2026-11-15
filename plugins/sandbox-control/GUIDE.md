@@ -93,11 +93,11 @@ repository is never opened for writing.
 
 ## Exclusions and secrets
 
-The capture excludes the environment files, the integration credentials,
-the model keys, the session directories, the project memory, the global
-configuration, the Git metadata, and the installed dependencies. The
-list is a deny list with a default-on posture: a path is excluded
-unless the declared configuration includes it explicitly.
+The capture always excludes environment files, integration credentials,
+model keys, session directories, project memory, global configuration,
+Git metadata, and installed dependencies. These protected exclusions
+cannot be overridden by `include`; that field only documents additional
+project paths to capture.
 
 A declared test secret is written to a file outside the capture and
 passed to the container with `--env-file`. It is never an argument,

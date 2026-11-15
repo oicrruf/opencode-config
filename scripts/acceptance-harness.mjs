@@ -27,6 +27,7 @@
 
 import { readFileSync, existsSync, readdirSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { RESOURCE_SOURCES } from './resource-manifest.mjs';
+import { isExcluded } from '../plugins/sandbox-control/sandbox-capture.mjs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -926,6 +927,17 @@ check('the sandbox plugin is present with its entry point', () => {
   assert(existsSync(join(dir, 'index.js')), 'the sandbox control plugin has no entry point');
   assert(existsSync(join(dir, 'GUIDE.md')), 'the sandbox control has no operator guide');
   return 'plugin, entry point, and guide are present';
+});
+
+check('the Desktop fixture does not override protected configuration exclusions', () => {
+  const fixtureRoot = join(repoRoot, 'scripts/fixtures/docker-desktop');
+  const sandbox = JSON.parse(readFileSync(join(fixtureRoot, 'opencode-sandbox.json'), 'utf8'));
+  const dockerfile = readFileSync(join(fixtureRoot, 'Dockerfile'), 'utf8');
+  assert(isExcluded('opencode.json', ['opencode.json']).excluded, 'a project include re-enabled the protected OpenCode config');
+  assert(!isExcluded('runtime-fixture.json').excluded, 'the fixture config filename is unexpectedly protected');
+  assert(!sandbox.include?.includes('opencode.json'), 'the runtime fixture includes the protected filename');
+  assert(dockerfile.includes('COPY runtime-fixture.json /fixture/opencode.json'), 'the fixture does not install its sanitized config into the isolated image');
+  return 'the runtime fixture uses a safe source name and installs the config only inside the isolated image';
 });
 
 check('the sandbox argument set asserts the isolation boundary', () => {
