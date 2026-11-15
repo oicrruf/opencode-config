@@ -314,16 +314,10 @@ check('frontmatter and opencode.jsonc agree on every agent model', () => {
   return 'frontmatter and jsonc agree';
 });
 
-// Step ceilings are declared in three places — the agent Markdown
-// frontmatter when present, the OpenCode JSONC rendered for the active
-// profile, and the template that the renderer reads. The contract from
-// the improve-agent-step-budgets change is selective: build moves to
-// 120, general/frontend/backend to 80, and every other agent's ceiling
-// stays where it was. This check pins all three surfaces together so a
-// future edit cannot silently drift.
+// AT-186: omission is intentional for primary agents. Specialists remain bounded.
 const STEPS_BY_AGENT = {
-  plan: 100,
-  build: 120,
+  plan: undefined,
+  build: undefined,
   general: 80,
   frontend: 80,
   backend: 80,
@@ -354,11 +348,21 @@ check('step ceilings agree across frontmatter, rendered config, and template', (
     if (templateSteps !== expected) {
       mismatches.push(`template ${agent}=${templateSteps}, expected ${expected}`);
     }
+    if (expected === undefined) {
+      for (const [label, entry] of [['rendered', cfg.agent?.[agent]], ['template', tpl.agent?.[agent]]]) {
+        if (!entry || Object.hasOwn(entry, 'steps') || Object.hasOwn(entry, 'maxSteps')) {
+          mismatches.push(`${label} ${agent} must omit steps and maxSteps`);
+        }
+      }
+    }
     const file = join(dir, `${agent}.md`);
     if (existsSync(file)) {
       const fm = readFrontmatter(file);
-      const fmSteps = fm?.steps != null ? Number(fm.steps) : null;
-      if (fmSteps !== null && fmSteps !== expected) {
+      const fmSteps = fm?.steps != null ? Number(fm.steps) : undefined;
+      if (expected === undefined && fm && (Object.hasOwn(fm, 'steps') || Object.hasOwn(fm, 'maxSteps'))) {
+        mismatches.push(`frontmatter ${agent} must omit steps and maxSteps`);
+      }
+      if (fmSteps !== expected) {
         mismatches.push(`frontmatter ${agent}=${fmSteps}, expected ${expected}`);
       }
     }
@@ -388,7 +392,7 @@ check('step ceiling table in agent/routing.md agrees with the template', () => {
     const expected = STEPS_BY_AGENT[agent];
     // Match a `| `agent`` row and capture the third cell (the `steps`).
     const re = new RegExp(
-      `^\\|\\s+\`${agent.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\`\\s*\\|\\s*[^|]+\\|\\s*(\\d+)\\s*\\|`,
+      `^\\|\\s+\`${agent.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\`\\s*\\|\\s*[^|]+\\|\\s*(\\d+|omitted)\\s*\\|`,
       'm',
     );
     const m = routingText.match(re);
@@ -396,7 +400,7 @@ check('step ceiling table in agent/routing.md agrees with the template', () => {
       mismatches.push(`${agent}: not found in routing table`);
       continue;
     }
-    const tableSteps = Number(m[1]);
+    const tableSteps = m[1] === "omitted" ? undefined : Number(m[1]);
     if (tableSteps !== expected) {
       mismatches.push(`routing.md ${agent}=${tableSteps}, expected ${expected}`);
     }
@@ -451,15 +455,15 @@ check('interruption handoff policy and fixture are present and shaped', () => {
     );
   }
   assert(
-    /do not restart automatically/i.test(agentsText),
-    'AGENTS.md must forbid automatic restart after exhaustion',
+    /do not\s+restart automatically/i.test(agentsText),
+    'AGENTS.md must forbid self-restart while allowing native continuity',
   );
   assert(
     /exact remaining-step counter/i.test(agentsText),
     'AGENTS.md must say the runtime does not expose an exact remaining-step counter',
   );
   assert(
-    /classification[\s\S]{0,200}decision[\s\S]{0,200}changed[\s\n]+files[\s\S]{0,300}verification results[\s\S]{0,200}blockers[\s\S]{0,200}OpenSpec task impact/i.test(
+    /classification[\s\S]{0,200}decision[\s\S]{0,200}changed\s+files[\s\S]{0,300}verification results[\s\S]{0,200}blockers[\s\S]{0,200}OpenSpec task impact/i.test(
       agentsText,
     ),
     'AGENTS.md must require specialists to preserve the existing structured return fields',
@@ -489,6 +493,15 @@ check('interruption handoff policy and fixture are present and shaped', () => {
     );
   }
   return 'interruption handoff policy and fixture are present and shaped';
+});
+
+check('primary continuity includes progress and permission stop conditions', () => {
+  const text = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  for (const needle of [/Autonomous continuity/, /three consecutive unsuccessful attempts/,
+    /prompt-level/, /cancellation/, /denied permission/, /review re-dispatch gates/]) {
+    assert(needle.test(text), `continuity policy missing ${needle}`);
+  }
+  return 'native continuity retains no-progress, cancellation, permission, and review boundaries';
 });
 
 check('small_model is on the value tier', () => {
@@ -768,7 +781,7 @@ check('build and routing document the risk-proportionate adversarial dispatch', 
     'agent/routing.md must include the risk-proportionate dispatch table',
   );
   assert(
-    /SHALL NOT re-dispatch `adversarial` for cosmetic/.test(routingText),
+    /SHALL\s+NOT re-dispatch `adversarial` for cosmetic/.test(routingText),
     'agent/routing.md must forbid cosmetic re-dispatches',
   );
   return 'build and routing document the risk-proportionate dispatch contract';

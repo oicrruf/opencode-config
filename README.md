@@ -57,6 +57,16 @@ manifest, validate with `node scripts/validate-config.mjs --profile <name>`,
 then archive. The validator rejects profiles with missing consumers or
 phantom IDs before any installed configuration is touched.
 
+### Autonomous execution
+
+The primary `build` and `plan` agents omit the fixed model-step limit and
+continue authorized work while making progress. Specialists keep finite budgets
+and return incomplete work to their coordinator. The shared policy stops on
+completion, real blockers, or repeated lack of progress; time/cost controls are
+prompt-level. See the [continuity contract](docs/contracts/autonomous-continuity.md)
+for tests, activation, overrides, and rollback. Reinstall your selected profile
+and start a fresh execution to replace an old installed primary limit.
+
 ### Windows (native, PowerShell 5.1+)
 
 ```powershell
