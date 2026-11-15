@@ -25,11 +25,11 @@
 //
 // Exit 0 when every test passes, 1 otherwise.
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { homedir, tmpdir } from 'node:os';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const results = [];
@@ -91,7 +91,7 @@ function readFrontmatter(file) {
   return result;
 }
 
-const GROUP_ORDER = ['static', 'routing', 'skills', 'sandbox', 'wrappers'];
+const GROUP_ORDER = ['static', 'routing', 'skills', 'sandbox', 'worktrees', 'wrappers'];
 
 // ---------------------------------------------------------------------------
 // static
@@ -314,16 +314,10 @@ check('frontmatter and opencode.jsonc agree on every agent model', () => {
   return 'frontmatter and jsonc agree';
 });
 
-// Step ceilings are declared in three places — the agent Markdown
-// frontmatter when present, the OpenCode JSONC rendered for the active
-// profile, and the template that the renderer reads. The contract from
-// the improve-agent-step-budgets change is selective: build moves to
-// 120, general/frontend/backend to 80, and every other agent's ceiling
-// stays where it was. This check pins all three surfaces together so a
-// future edit cannot silently drift.
+// AT-186: omission is intentional for primary agents. Specialists remain bounded.
 const STEPS_BY_AGENT = {
-  plan: 100,
-  build: 120,
+  plan: undefined,
+  build: undefined,
   general: 80,
   frontend: 80,
   backend: 80,
@@ -354,11 +348,21 @@ check('step ceilings agree across frontmatter, rendered config, and template', (
     if (templateSteps !== expected) {
       mismatches.push(`template ${agent}=${templateSteps}, expected ${expected}`);
     }
+    if (expected === undefined) {
+      for (const [label, entry] of [['rendered', cfg.agent?.[agent]], ['template', tpl.agent?.[agent]]]) {
+        if (!entry || Object.hasOwn(entry, 'steps') || Object.hasOwn(entry, 'maxSteps')) {
+          mismatches.push(`${label} ${agent} must omit steps and maxSteps`);
+        }
+      }
+    }
     const file = join(dir, `${agent}.md`);
     if (existsSync(file)) {
       const fm = readFrontmatter(file);
-      const fmSteps = fm?.steps != null ? Number(fm.steps) : null;
-      if (fmSteps !== null && fmSteps !== expected) {
+      const fmSteps = fm?.steps != null ? Number(fm.steps) : undefined;
+      if (expected === undefined && fm && (Object.hasOwn(fm, 'steps') || Object.hasOwn(fm, 'maxSteps'))) {
+        mismatches.push(`frontmatter ${agent} must omit steps and maxSteps`);
+      }
+      if (fmSteps !== expected) {
         mismatches.push(`frontmatter ${agent}=${fmSteps}, expected ${expected}`);
       }
     }
@@ -388,7 +392,7 @@ check('step ceiling table in agent/routing.md agrees with the template', () => {
     const expected = STEPS_BY_AGENT[agent];
     // Match a `| `agent`` row and capture the third cell (the `steps`).
     const re = new RegExp(
-      `^\\|\\s+\`${agent.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\`\\s*\\|\\s*[^|]+\\|\\s*(\\d+)\\s*\\|`,
+      `^\\|\\s+\`${agent.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')}\`\\s*\\|\\s*[^|]+\\|\\s*(\\d+|omitted)\\s*\\|`,
       'm',
     );
     const m = routingText.match(re);
@@ -396,7 +400,7 @@ check('step ceiling table in agent/routing.md agrees with the template', () => {
       mismatches.push(`${agent}: not found in routing table`);
       continue;
     }
-    const tableSteps = Number(m[1]);
+    const tableSteps = m[1] === "omitted" ? undefined : Number(m[1]);
     if (tableSteps !== expected) {
       mismatches.push(`routing.md ${agent}=${tableSteps}, expected ${expected}`);
     }
@@ -451,15 +455,15 @@ check('interruption handoff policy and fixture are present and shaped', () => {
     );
   }
   assert(
-    /do not restart automatically/i.test(agentsText),
-    'AGENTS.md must forbid automatic restart after exhaustion',
+    /do not\s+restart automatically/i.test(agentsText),
+    'AGENTS.md must forbid self-restart while allowing native continuity',
   );
   assert(
     /exact remaining-step counter/i.test(agentsText),
     'AGENTS.md must say the runtime does not expose an exact remaining-step counter',
   );
   assert(
-    /classification[\s\S]{0,200}decision[\s\S]{0,200}changed[\s\n]+files[\s\S]{0,300}verification results[\s\S]{0,200}blockers[\s\S]{0,200}OpenSpec task impact/i.test(
+    /classification[\s\S]{0,200}decision[\s\S]{0,200}changed\s+files[\s\S]{0,300}verification results[\s\S]{0,200}blockers[\s\S]{0,200}OpenSpec task impact/i.test(
       agentsText,
     ),
     'AGENTS.md must require specialists to preserve the existing structured return fields',
@@ -489,6 +493,15 @@ check('interruption handoff policy and fixture are present and shaped', () => {
     );
   }
   return 'interruption handoff policy and fixture are present and shaped';
+});
+
+check('primary continuity includes progress and permission stop conditions', () => {
+  const text = readFileSync(join(repoRoot, 'AGENTS.md'), 'utf8');
+  for (const needle of [/Autonomous continuity/, /three consecutive unsuccessful attempts/,
+    /prompt-level/, /cancellation/, /denied permission/, /review re-dispatch gates/]) {
+    assert(needle.test(text), `continuity policy missing ${needle}`);
+  }
+  return 'native continuity retains no-progress, cancellation, permission, and review boundaries';
 });
 
 check('small_model is on the value tier', () => {
@@ -768,7 +781,7 @@ check('build and routing document the risk-proportionate adversarial dispatch', 
     'agent/routing.md must include the risk-proportionate dispatch table',
   );
   assert(
-    /SHALL NOT re-dispatch `adversarial` for cosmetic/.test(routingText),
+    /SHALL\s+NOT re-dispatch `adversarial` for cosmetic/.test(routingText),
     'agent/routing.md must forbid cosmetic re-dispatches',
   );
   return 'build and routing document the risk-proportionate dispatch contract';
@@ -980,6 +993,129 @@ check('the sandbox module tests pass without Docker', () => {
   const boundaries = run(process.execPath, [join(dir, 'boundaries.test.mjs')]);
   assert(!/fail [1-9]/.test(boundaries), `the boundary tests failed:\n${boundaries}`);
   return 'the reservation, capture, lifecycle, and boundary tests pass on a host without Docker';
+});
+
+// ---------------------------------------------------------------------------
+// worktrees
+// ---------------------------------------------------------------------------
+
+group('worktrees');
+
+check('the worktree tool grants match the intended agents', () => {
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const granted = ['build', 'refactor'];
+  const denied = ['qa', 'adversarial', 'explore', 'cotizador', 'triage', 'plan', 'doctor'];
+  const offenders = [];
+  for (const agent of granted) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    if (perms['worktree_*'] !== 'allow') {
+      offenders.push(`${agent}: worktree_* is ${perms['worktree_*'] ?? '(unset)'}, expected allow`);
+    }
+  }
+  for (const agent of denied) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    if (perms['worktree_*'] === 'allow' || perms['worktree_*'] === 'ask') {
+      offenders.push(`${agent}: worktree_* is ${perms['worktree_*']}, expected not granted`);
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${granted.length} agents granted, ${denied.length} agents denied`;
+});
+
+check('the refactor agent creates its worktree through the managed control', () => {
+  const refactorText = readFileSync(join(repoRoot, 'agent', 'refactor.md'), 'utf8');
+  assert(!/git\s+worktree\s+add/.test(refactorText), 'agent/refactor.md still creates a worktree with a raw Git command');
+  assert(/worktree_create/.test(refactorText), 'agent/refactor.md must request its worktree with `worktree_create`');
+  assert(/worktree_retire/.test(refactorText), 'agent/refactor.md must retire its worktree through the managed control');
+  return 'the refactor agent uses the managed control for creation and retirement';
+});
+
+check('the build agent documents the retirement sequence', () => {
+  const buildText = readFileSync(join(repoRoot, 'agent', 'build.md'), 'utf8');
+  assert(/Managed worktrees/.test(buildText), 'agent/build.md must document the managed worktree flow');
+  assert(/worktree_retire/.test(buildText), 'agent/build.md must name the retirement request');
+  assert(/preserv\w*\s+remote/i.test(buildText) && /removal of the local branch/i.test(buildText),
+    'agent/build.md must report branch removal and the preserved remote separately');
+  assert(/never retire/i.test(buildText), 'agent/build.md must state that age and capacity never retire a worktree');
+  return 'the build agent documents the three separate retirement results';
+});
+
+check('the worktree plugin is present with its entry point', () => {
+  const dir = join(repoRoot, 'plugins', 'worktree-control');
+  assert(existsSync(dir), 'the worktree control plugin directory is missing');
+  assert(existsSync(join(dir, 'index.js')), 'the worktree control plugin has no entry point');
+  return 'plugin and entry point are present';
+});
+
+check('the installer links the worktree plugin entry point', () => {
+  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
+  assert(installText.includes('link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"'),
+    'install.sh must link the worktree entry point into the global plugins directory');
+  const temporaryRoot = mkdtempSync(join(tmpdir(), 'worktree-plugin-install-'));
+  try {
+    const pluginDir = join(temporaryRoot, 'plugins');
+    mkdirSync(pluginDir);
+    const installedEntry = join(pluginDir, 'worktree-control.js');
+    symlinkSync(join(repoRoot, 'plugins', 'worktree-control', 'index.js'), installedEntry);
+    const script = `
+      const plugin = await import(${JSON.stringify(pathToFileURL(installedEntry).href)});
+      if (typeof plugin.WorktreeControlPlugin !== 'function') throw new Error('plugin entry point did not load');
+      console.log('OK');
+    `;
+    const output = run(process.execPath, ['--input-type=module', '-e', script]);
+    assert(output.includes('OK'), `the installed plugin entry point did not load: ${output.trim()}`);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+  return 'the worktree plugin is installed at the global plugin entry point';
+});
+
+check('the worktree inventory reconciles and the capacity announces no limit', () => {
+  const script = `
+    const { describeInventory, reconcileInventory } = await import(${JSON.stringify(
+      join(repoRoot, 'plugins', 'worktree-control', 'inventory.mjs'),
+    )});
+    const { reportCapacity, evaluateCapacityForCreation } = await import(${JSON.stringify(
+      join(repoRoot, 'plugins', 'worktree-control', 'capacity.mjs'),
+    )});
+    const { validateRetirementRequest } = await import(${JSON.stringify(
+      join(repoRoot, 'plugins', 'worktree-control', 'removal.mjs'),
+    )});
+    const inventory = describeInventory(${JSON.stringify(repoRoot)}, [
+      { name: 'checkout', directory: ${JSON.stringify(repoRoot)}, branch: 'checkout' },
+    ]);
+    if (!inventory.ok || inventory.unrecorded < 1) {
+      throw new Error('the inventory did not reconcile an unrecorded worktree');
+    }
+    const unknown = reconcileInventory(${JSON.stringify(repoRoot)}, [], { verified: false });
+    if (!unknown.ok || unknown.verified || unknown.missing.length !== 0) {
+      throw new Error('an unverified listing was not kept unknown');
+    }
+    const capacity = reportCapacity(${JSON.stringify(repoRoot)}, 0);
+    if (capacity.maximum !== null || capacity.remaining !== null) throw new Error('capacity invented a limit');
+    if (!evaluateCapacityForCreation({ available: true, availableBytes: 0 }).blocked) throw new Error('zero space did not block');
+    if (evaluateCapacityForCreation({ available: true, availableBytes: 1 }).blocked) throw new Error('nonzero space blocked');
+    if (evaluateCapacityForCreation({ available: false, reason: 'not measured' }).blocked) throw new Error('unknown space blocked');
+    const incomplete = validateRetirementRequest({});
+    if (incomplete.ok) throw new Error('an incomplete request was accepted');
+    for (const field of ['worktree', 'branch', 'base', 'head', 'evidence']) {
+      if (!incomplete.missing.some((entry) => entry.field === field)) throw new Error('missing field not named: ' + field);
+    }
+    console.log('OK');
+  `;
+  const output = run(process.execPath, ['--input-type=module', '-e', script]);
+  assert(output.includes('OK'), `the worktree contract check failed: ${output.trim()}`);
+  return 'the inventory reconciles conservatively, capacity reports only measurements, and incomplete identity is refused';
+});
+
+check('the worktree module tests pass', () => {
+  const dir = join(repoRoot, 'plugins', 'worktree-control', 'test');
+  for (const file of ['control.test.mjs', 'retirement.test.mjs']) {
+    assert(existsSync(join(dir, file)), `the worktree test file ${file} is missing`);
+    const output = run(process.execPath, [join(dir, file)]);
+    assert(!/fail [1-9]/.test(output), `the worktree test file ${file} failed:\n${output}`);
+  }
+  return 'the control and retirement tests pass';
 });
 
 // ---------------------------------------------------------------------------

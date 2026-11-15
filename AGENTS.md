@@ -14,21 +14,30 @@ validators.
   and `refactor` may raise it to `2`. Specialists do not dispatch further.
 - **Routing matrix.** Every agent MUST consult `agent/routing.md` before any
   tool call and state the work class with one sentence of evidence.
-- **Step budgets.** `build` runs at a ceiling of 120 model steps; `general`,
-  `frontend`, and `backend` run at 80; every other agent keeps its current
-  ceiling. These are finite ceilings, not quotas. After acceptance
-  conditions and required verification pass, the agent MUST stop instead
-  of consuming the remaining allowance. The four ceilings are declared in
-  three places — `config/opencode.template.jsonc`, the agent Markdown
-  frontmatter when present, and `agent/routing.md` — and a structural
-  check in `scripts/acceptance-harness.mjs` fails the build when any of
-  those declarations drift. The ceilings only take effect after the
-  operator runs `./install.sh` (which renders the template into the
-  active profile and replaces `~/.config/opencode/opencode.jsonc`); until
-  then a previously-installed session keeps the prior ceilings, and a
-  project-local `opencode.jsonc` overrides the installed values. To roll
-  back, restore the previous ceilings in the three declaration sites,
-  re-run the validator, and reinstall the same profile.
+- **Step budgets.** The primary agents `build` and `plan` omit `steps` so
+  authorized work can continue without a fixed model-step ceiling. Specialists
+  retain finite ceilings: `general`, `frontend`, `backend` 80; `qa` 60;
+  `explore`, `triage` 25; all other configured specialists 100. Ceilings are
+  not quotas: stop after acceptance and required verification pass. Template,
+  rendered config, frontmatter, and `agent/routing.md` must agree; the
+  acceptance harness checks omission as well as finite values. Run
+  `./install.sh --profile <selected>` and start a fresh execution to activate
+  the root config; an old installed global value or project override can
+  still impose a limit. See `docs/contracts/autonomous-continuity.md` for
+  evidence, effective-config checks, and rollback.
+- **Autonomous continuity.** Continue pending authorized work while making
+  progress. After each bounded unit, checkpoint completed work/files, ordered
+  pending actions, verification run/not run, and blockers in conversation.
+  On specialist exhaustion, use its evidence to finish pending work directly
+  within your permissions or delegate a narrower unit within the existing
+  routing, depth, and review re-dispatch gates. Specialists never restart
+  themselves. Stop after three consecutive unsuccessful attempts at the same
+  blocked action without new evidence, unless the operator supplies another
+  finite threshold. Honor explicit operator elapsed-time/cost budgets using
+  observed values; disclose unavailable accounting. These are prompt-level
+  controls, not guaranteed runtime watchdogs or hard monetary caps. Stop on
+  cancellation, denied permission, persistent provider failure, or a real
+  scope/authorization blocker; never fabricate user input or bypass a gate.
 - **Step efficiency.** Reuse relevant evidence already obtained instead of
   re-running a successful discovery without a concrete reason. Group
   independent reads or queries when tool capabilities and dependency
@@ -36,21 +45,19 @@ validators.
   Coordinators divide long work into bounded verifiable units within the
   existing scope and delegation gates. Efficiency MUST NOT bypass
   required verification, permissions, planning boundaries, or review.
-- **Interruption handoff.** When the runtime reports that the step ceiling
-  is reached, the agent MUST stop and produce a compact text handoff in
-  its next assistant turn instead of attempting another tool call. The
-  handoff covers: (1) completed work and the files changed, (2) pending
-  work in the order it should be done, (3) verification that was run and
-  verification that was not run, (4) blockers or risks the next agent
-  must consider, and (5) the next manual action for the user. Do not
-  claim an exact remaining-step counter (the runtime does not expose
-  one) and do not restart automatically. Specialists preserve the
-  existing structured return fields (classification, decision, changed
-  files, verification results, blockers, OpenSpec task impact) and place
-  pending work and next actions inside the appropriate field rather
-  than inventing new ones. A documented fixture in
-  `docs/contracts/interruption-handoff.md` shows the expected shape for
-  primary and specialist agents.
+- **Interruption handoff.** If an external runtime limit or real blocker
+  interrupts unfinished work, provide a compact text handoff: (1) completed
+  work/files, (2) pending work in order, (3) verification run and not run,
+  (4) blockers or risks, and (5) next action (next manual action when human
+  input is required). If tools have been removed, make no further tool call
+  and do not claim a final checkpoint write or verification. Do not claim an
+  exact remaining-step counter unless the runtime exposes one; do not
+  restart automatically or simulate user input. Manual continuation is a
+  fallback for a genuinely interrupted primary, not the normal lifecycle of
+  a long task. Specialists preserve their structured fields: classification,
+  decision, changed files, verification results, blockers, OpenSpec task impact.
+  Put pending work and next actions inside those fields. See
+  `docs/contracts/interruption-handoff.md` for both variants.
 - **OpenSpec workflow.** Durable changes — new features, behaviour changes,
   new profiles, profile edits, schema migrations — go through
   `openspec/changes/<change-name>/`. The workflow is: explore (optional) →
@@ -71,6 +78,17 @@ validators.
   agent. Starting the environment never approves a product, and the
   sandbox never modifies the host's branches or publishes code. The
   operator guide is `plugins/sandbox-control/GUIDE.md`.
+- **Managed worktrees.** A change that needs an isolated workspace gets
+  it through the managed worktree control (`plugins/worktree-control/`),
+  never through a raw `git worktree add`. The control creates the worktree
+  outside the canonical checkout and records it in the project's inventory.
+  Retirement requires an explicit request with the worktree, branch, base,
+  expected head, and evidence; it is blocked by local changes, unpublished
+  commits, process access, unrecognized ignored files, unsafe paths, or
+  unverifiable checks. Evidence is preserved before removal, the remote
+  branch and published commits are never removed, and age/capacity never
+  retire a worktree. The legacy `.opencode/worktree/` path remains ignored
+  for compatibility only.
 - **Line endings.** The repository declares `* text=auto eol=lf` in
   `.gitattributes` so every shell and runtime file (`*.sh`, `*.ps1`,
   `*.mjs`, `*.js`, `*.ts`, `*.tsx`, `*.cjs`, `*.mts`, `*.cts`) is LF

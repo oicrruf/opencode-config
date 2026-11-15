@@ -24,7 +24,11 @@ session, or removed by an over-eager cleanup, is a lost change.
   accessing it, unrecognized ignored files, or an unsafe path.
 - Preserve the review and verification evidence outside the worktree before
   it is removed, with a manifest that ties it to the branch and the work,
-  and without copying secrets.
+  without overwriting previously preserved evidence, and without copying
+  secrets.
+- Verify the requested worktree identity against the actual branch, head,
+  and base before preserving evidence or removing anything; reject unsafe
+  symlinked state paths.
 - Remove the local branch of a retired worktree only when the published
   state has been verified, and never remove the remote branch or the
   published commits.
@@ -58,7 +62,7 @@ session, or removed by an over-eager cleanup, is a lost change.
   add` to the managed control, and `agent/build.md` learns the retirement
   sequence.
 - Configuration: the managed tools are granted to the agents that isolate
-  work.
+  work, and the installer makes the plugin available to OpenCode.
 - Repository layout: the legacy `.opencode/worktree/` path stays ignored
   while the managed worktrees live outside the checkout.
 - Validation: the validator and the acceptance harness gain assertions for

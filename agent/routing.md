@@ -41,8 +41,8 @@ inherits from the class.
 
 | Agent                | Default model            | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
 |----------------------|--------------------------|---------|-------------|-----------|--------|----------|
-| `plan`               | `openai/gpt-5.6-luna`    | 100     | deny        | allow     | deny   | allow     |
-| `build`              | `ollama-cloud/gpt-oss:20b`| 120     | deny        | allow     | deny   | allow     |
+| `plan`               | `openai/gpt-5.6-luna`    | omitted | deny        | allow     | deny   | allow     |
+| `build`              | `ollama-cloud/gpt-oss:20b`| omitted | deny        | allow     | deny   | allow     |
 | `general`            | `ollama-cloud/gpt-oss:20b`| 80      | deny        | allow     | deny   | allow     |
 | `explore`            | `ollama-cloud/gpt-oss:20b` | 25    | deny        | allow     | deny   | deny      |
 | `architect`          | `openai/gpt-5.6-terra`   | 100     | deny        | allow     | deny   | allow     |
@@ -56,12 +56,16 @@ inherits from the class.
 | `p5t-installer`      | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
 | `doctor`             | `ollama-cloud/gpt-oss:20b` | 100   | deny        | allow     | deny   | allow     |
 
-`steps` is a **ceiling**, not a quota. OpenCode accepts exactly one
-`steps` value per agent, so the audit roles (`qa`, `adversarial`,
-`cotizador`) declare the budget of their highest mode: a `targeted` run
-that finishes early simply stops early and does not spend the remaining
-iterations. `steps` therefore tracks the worst-case surface, while the
-`mode` parameter controls how much of that surface is actually used.
+`steps` is omitted for the primary agents `build` and `plan`: native
+execution continues while authorized work remains and progress is being made.
+The other agents are bounded specialists; their `steps` value is a **ceiling**,
+not a quota. Targeted/full reviewers use their highest-mode allowance and stop
+as soon as their scoped work is complete. `triage` (not listed above) keeps 25.
+
+Follow the continuity, checkpoints, no-progress threshold, and interruption
+handoff policy in `AGENTS.md`. Specialist exhaustion returns incomplete evidence
+to the coordinator; it does not by itself end the primary task. The coordinator
+must preserve permission, scope, depth, and review re-dispatch gates.
 
 ## Classification gate
 

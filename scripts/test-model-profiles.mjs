@@ -143,6 +143,29 @@ check('explicit --profile work renders distinct assignments', () => {
   }
 });
 
+check('both profiles omit primary steps and retain specialist budgets', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'profile-continuity-'));
+  try {
+    for (const profile of ['personal', 'work']) {
+      const out = join(tmp, `${profile}.jsonc`);
+      const result = renderProfile(profile, out);
+      if (result.status !== 0) throw new Error(result.stderr);
+      const agents = readJsonc(out).agent;
+      for (const name of ['build', 'plan']) {
+        if (Object.hasOwn(agents[name], 'steps') || Object.hasOwn(agents[name], 'maxSteps')) {
+          throw new Error(`${profile}.${name} must omit steps and maxSteps`);
+        }
+      }
+      for (const [name, steps] of Object.entries({general:80, frontend:80, backend:80,
+        explore:25, triage:25, qa:60, architect:100, orchestrator:100, refactor:100,
+        adversarial:100, cotizador:100, 'p5t-installer':100, doctor:100})) {
+        if (agents[name].steps !== steps) throw new Error(`${profile}.${name} lost its ${steps} ceiling`);
+      }
+    }
+    return 'personal/work: two uncapped primaries, thirteen bounded specialists';
+  } finally { rmSync(tmp, {recursive:true, force:true}); }
+});
+
 // 4. Unknown profile rejected
 check('unknown profile is rejected with non-zero exit', () => {
   const result = renderProfile('nonexistent-profile', '/tmp/should-not-exist.jsonc');

@@ -111,6 +111,19 @@ tight.
 - **THEN** the system SHALL refuse the request and SHALL report what the
   request must carry
 
+#### Scenario: The retirement identity does not match the worktree
+
+- **WHEN** the requested branch, expected head, or base does not match the
+  actual worktree and its published integration state
+- **THEN** the system SHALL refuse the request before preserving evidence or
+  removing anything, and SHALL report the identity mismatch
+
+#### Scenario: The retiring branch is named as its own base
+
+- **WHEN** the requested base is the same branch as the worktree branch
+- **THEN** the system SHALL refuse the request because the worktree has not
+  been verified as integrated into a distinct base
+
 ### Requirement: Retirement is blocked by unsafe conditions
 
 The system SHALL verify, before removing anything, that the worktree holds
@@ -143,6 +156,13 @@ SHALL report the specific condition that blocked it.
   expected location
 - **THEN** the system SHALL keep it and SHALL report the unsafe path as the
   blocking condition
+
+#### Scenario: A state or evidence path contains a symbolic link
+
+- **WHEN** a path component used for the project's inventory, lock, or
+  preserved evidence is a symbolic link
+- **THEN** the system SHALL refuse the operation before reading or writing
+  through that path, and SHALL report the unsafe path
 
 #### Scenario: The worktree is clean
 
@@ -178,6 +198,13 @@ preserved, the system SHALL keep the worktree.
   the evidence policy does not recognize as evidence
 - **THEN** the system SHALL NOT copy it and SHALL report that it was left
   out
+
+#### Scenario: The evidence destination already exists
+
+- **WHEN** a preservation destination for the worktree and date already
+  exists
+- **THEN** the system SHALL choose a new exclusive destination or refuse
+  preservation without changing the existing evidence
 
 ### Requirement: The local branch is removed only after the published state is verified
 
@@ -270,3 +297,15 @@ reclaim it on the basis of its age.
 - **WHEN** a lock exists whose owner identity cannot be verified
 - **THEN** the system SHALL keep the lock, SHALL NOT reclaim it because it
   is old, and SHALL report that the lock's owner is unverifiable
+
+### Requirement: The plugin is available after installation
+
+The installer SHALL make the worktree control plugin available to the
+installed OpenCode profile, alongside the configuration grants for its
+tools.
+
+#### Scenario: The configuration is installed
+
+- **WHEN** the repository installer links the OpenCode resources
+- **THEN** the worktree control plugin SHALL be present in the installed
+  plugin location and its managed tools SHALL be loadable

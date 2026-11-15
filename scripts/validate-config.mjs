@@ -359,6 +359,7 @@ function runStructuralChecks() {
   }
 
   runSandboxSurfaceChecks();
+  runWorktreeSurfaceChecks();
 }
 
 // The sandbox control is granted to the agents that verify a change.
@@ -369,6 +370,53 @@ function runStructuralChecks() {
 // The check reads the template (the source of the rendered config) and
 // the rendered config when it is present, so a grant that drifts in
 // either surface fails the build.
+function runWorktreeSurfaceChecks() {
+  const templatePath = join(repoRoot, 'config', 'opencode.template.jsonc');
+  const renderedPath = join(repoRoot, 'opencode.jsonc');
+  const granted = ['build', 'refactor'];
+  const denied = ['qa', 'adversarial', 'explore', 'cotizador', 'triage', 'plan', 'doctor'];
+
+  for (const file of [templatePath, renderedPath]) {
+    if (!existsSync(file)) continue;
+    const cfg = readJsonc(file);
+    for (const agent of granted) {
+      if ((cfg.agent?.[agent]?.permission ?? {})['worktree_*'] !== 'allow') {
+        fail(file, `agent.${agent}: the worktree control grants 'worktree_*', expected 'allow'`);
+      }
+    }
+    for (const agent of denied) {
+      const permission = (cfg.agent?.[agent]?.permission ?? {})['worktree_*'];
+      if (permission === 'allow' || permission === 'ask') {
+        fail(file, `agent.${agent}: the worktree control must not grant 'worktree_*'`);
+      }
+    }
+  }
+
+  const pluginDir = join(repoRoot, 'plugins', 'worktree-control');
+  const entryPoint = join(pluginDir, 'index.js');
+  if (!existsSync(pluginDir)) fail(pluginDir, 'the worktree control plugin directory is missing');
+  else if (!existsSync(entryPoint)) fail(entryPoint, 'the worktree control plugin has no entry point');
+
+  const installPath = join(repoRoot, 'install.sh');
+  if (existsSync(installPath)) {
+    const installText = readFileSync(installPath, 'utf8');
+    if (!installText.includes('link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"')) {
+      fail(installPath, 'install.sh does not link the worktree control plugin entry point');
+    }
+  }
+
+  const refactorPath = join(repoRoot, 'agent', 'refactor.md');
+  if (existsSync(refactorPath)) {
+    const text = readFileSync(refactorPath, 'utf8');
+    if (/git\s+worktree\s+add/.test(text)) {
+      fail(refactorPath, 'the refactor agent must use the managed control, not raw `git worktree add`');
+    }
+    if (!/worktree_create/.test(text)) {
+      fail(refactorPath, 'the refactor agent must request its worktree with `worktree_create`');
+    }
+  }
+}
+
 function runSandboxSurfaceChecks() {
   const TEMPLATE = join(repoRoot, 'config', 'opencode.template.jsonc');
   const RENDERED = join(repoRoot, 'opencode.jsonc');

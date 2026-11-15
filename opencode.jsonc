@@ -39,7 +39,6 @@
   },
   "agent": {
     "plan": {
-      "steps": 100,
       "permission": {
         "edit": "deny",
         "bash": {
@@ -73,7 +72,6 @@
       "model": "openai/gpt-5.6-terra"
     },
     "build": {
-      "steps": 120,
       "permission": {
         "edit": "allow",
         "bash": "ask",
@@ -81,7 +79,8 @@
         "codegraph_*": "allow",
         "context7_*": "allow",
         "sandbox_*": "allow",
-        "reservation_*": "allow"
+        "reservation_*": "allow",
+        "worktree_*": "allow"
       },
       "model": "ollama-cloud/gpt-oss:20b"
     },
@@ -153,7 +152,8 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow",
-        "serena_*": "allow"
+        "serena_*": "allow",
+        "worktree_*": "allow"
       },
       "model": "openai/gpt-5.6-terra"
     },

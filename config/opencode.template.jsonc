@@ -37,7 +37,6 @@
   },
   "agent": {
     "plan": {
-      "steps": 100,
       "permission": {
         "edit": "deny",
         "bash": { "*": "ask" },
@@ -62,7 +61,6 @@
       }
     },
     "build": {
-      "steps": 120,
       "permission": {
         "edit": "allow",
         "bash": "ask",
@@ -70,7 +68,8 @@
         "codegraph_*": "allow",
         "context7_*": "allow",
         "sandbox_*": "allow",
-        "reservation_*": "allow"
+        "reservation_*": "allow",
+        "worktree_*": "allow"
       }
     },
     "general": {
@@ -136,7 +135,8 @@
         "external_directory": "allow",
         "codegraph_*": "allow",
         "context7_*": "allow",
-        "serena_*": "allow"
+        "serena_*": "allow",
+        "worktree_*": "allow"
       }
     },
     "architect": {

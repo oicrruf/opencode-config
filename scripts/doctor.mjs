@@ -115,6 +115,7 @@ const linkEntries = [
   'herdr-tui-session.js',
   'quota-tui.tsx',
   'plugins/herdr-agent-state.js',
+  'plugins/worktree-control.js',
 ];
 
 if (!existsSync(configDir)) {
