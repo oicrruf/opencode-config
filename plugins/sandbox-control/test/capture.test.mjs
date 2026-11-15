@@ -36,6 +36,7 @@ import { execFileSync } from "node:child_process";
 const { readSandboxConfig, resolveInside } = await import("../sandbox-config.mjs");
 const { takeCapture, verifyCapture, prepareIndependentRepository, isExcluded } =
   await import("../sandbox-capture.mjs");
+const { screenValue } = await import("../secret-screen.mjs");
 const {
   buildBuildArguments,
   buildRunArguments,
@@ -203,6 +204,13 @@ test("a capture with a credential-shaped file is refused", () => {
   });
 });
 
+test("credential scanning distinguishes code references from embedded credential literals", () => {
+  assert.equal(screenValue("const token = generateOwnerToken();"), null);
+  assert.equal(screenValue("return { token: acquired.token };"), null);
+  assert.equal(screenValue('const apiKey = "sk-abcdefghijklmnop123456";'), "the value looks like a named credential assignment");
+  assert.equal(screenValue('password: "not-a-real-secret-but-long"'), "the value looks like a named credential assignment");
+});
+
 test("the argument set carries none of the forbidden options", () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, "Dockerfile"), "FROM scratch\n");
@@ -249,7 +257,9 @@ test("the run binds the ports to the loopback interface only", () => {
   assert.equal(run.ok, true);
   assert.equal(assertNoForbiddenOptions(run.args).ok, true);
   assert.ok(run.args.includes("--publish"));
-  assert.ok(run.args.includes("8080:127.0.0.1:18080"));
+  // Docker publish syntax is host-IP:host-port:container-port; the old order was invalid.
+  // Source: https://docs.docker.com/engine/network/port-publishing/
+  assert.ok(run.args.includes("127.0.0.1:18080:8080"));
 
   const external = buildRunArguments({
     imageTag: "sandbox:exec-1",

@@ -43,6 +43,11 @@ export const REFUSAL_REASONS = {
   argument: "the argument looks like a credential",
 };
 
+function isCodeReference(value) {
+  return /^[A-Za-z_$][\w$]*(?:(?:\?\.|\.)[A-Za-z_$][\w$]*)+(?:\(\))?$/.test(value) ||
+    /^[A-Za-z_$][\w$]*\(\)$/.test(value);
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -56,7 +61,10 @@ export function screenValue(value) {
 
   for (const pattern of ASSIGNMENT_PATTERNS) {
     const re = new RegExp(pattern.source, pattern.flags);
-    if (re.test(value)) return REFUSAL_REASONS.assignment;
+    let match;
+    while ((match = re.exec(value)) !== null) {
+      if (!isCodeReference(match[1])) return REFUSAL_REASONS.assignment;
+    }
   }
   for (const pattern of PROVIDER_PATTERNS) {
     const re = new RegExp(pattern.source, pattern.flags);

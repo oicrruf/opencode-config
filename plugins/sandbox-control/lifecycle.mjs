@@ -13,7 +13,6 @@
 // The Docker calls are injectable so the lifecycle can be tested
 // without an engine.
 
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, relative, resolve, sep, isAbsolute } from "node:path";
@@ -24,13 +23,13 @@ import {
   buildBuildArguments,
   buildRunArguments,
   buildNetworkArguments,
-  checkEngineHost,
-  checkEngineReachable,
   labelArguments,
   LABEL_KEY,
 } from "./docker-adapter.mjs";
 import { ensureDir, reportDir, captureRootDir } from "./paths.mjs";
 import { screenValue } from "./secret-screen.mjs";
+
+import { inspectLocalEngine, boundDocker } from "./engine.mjs";
 
 export const RESULT_STATES = ["passed", "failed", "blocked", "not executed"];
 
@@ -126,10 +125,11 @@ export async function startSandbox(input, deps = {}) {
   if (!workId) return { ok: false, reason: "the start needs a work identifier" };
   if (!worktreePath) return { ok: false, reason: "the start needs a worktree path" };
 
-  const host = checkEngineHost(deps.platform, deps.release);
-  if (!host.ok) return { ok: false, blocked: true, reason: host.reason };
-  const engine = checkEngineReachable(deps);
-  if (!engine.ok) return { ok: false, blocked: true, reason: engine.reason };
+  const engine = inspectLocalEngine(deps);
+  if (!engine.ok) return engine;
+  let run;
+  try { run = boundDocker(engine.binding, deps); }
+  catch (error) { return { ok: false, blocked: true, reason: error.message }; }
 
   const projectRoot = deps.projectRoot ?? worktreePath;
   const config = readSandboxConfig(projectRoot);
@@ -168,6 +168,7 @@ export async function startSandbox(input, deps = {}) {
   const identity = buildExecutionIdentity(workId, workName);
   const record = {
     ...identity,
+    engine: engine.binding,
     sessionId,
     startedAt: new Date().toISOString(),
     phase: "preparing",
@@ -190,6 +191,7 @@ export async function startSandbox(input, deps = {}) {
     workName,
     executionId: identity.executionId,
     cwd,
+    include: config.config.include,
   });
   if (!capture.ok) {
     releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
@@ -258,6 +260,8 @@ export async function startSandbox(input, deps = {}) {
   // resources it created are still present: the quota is released only
   // after the labeled cleanup has verified their absence.
   const abandon = (reason, phase) => {
+    const evidence = preserveClosure(cwd, record, `start failed in ${phase ?? record.phase}`);
+    if (!evidence.ok) return { ok: false, phase, reason: evidence.reason, quotaReleased: false, resourcesKept: true };
     const cleanup = cleanupExecution(cwd, identity.executionId, deps);
     let quotaReleased = false;
     if (cleanup.ok) {
@@ -278,7 +282,6 @@ export async function startSandbox(input, deps = {}) {
     };
   };
 
-  const run = deps.execFileSync ?? execFileSync;
   try {
     run("docker", build.args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
   } catch (err) {
@@ -385,6 +388,7 @@ export function sandboxStatus(cwd, executionId) {
       phase: record.record.phase,
       result: record.record.result,
       startedAt: record.record.startedAt,
+      engine: record.record.engine ?? null,
       image: record.record.image,
       container: record.record.container,
       captureFingerprint: record.record.capture?.manifest?.files?.length ?? null,
@@ -605,6 +609,7 @@ export function buildReport(record, input) {
         files: record.capture?.manifest?.files?.length ?? 0,
         fingerprint: captureFingerprint(record),
       },
+      engine: record.engine ?? null,
       image: record.image,
       container: record.container,
       network: record.network,
@@ -655,7 +660,9 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
   const record = readExecutionRecord(cwd, executionId);
   if (!record.ok) return { ok: false, reason: record.reason };
 
-  const run = deps.execFileSync ?? execFileSync;
+  let run;
+  try { run = boundDocker(record.record.engine, deps); }
+  catch (error) { return { ok: false, blocked: true, reason: error.message, remaining: ["engine identity unverified"] }; }
   const removed = [];
   const remaining = [];
 
@@ -727,14 +734,15 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
   const stillPresent = [];
   for (const { kind } of kinds) {
     const ids = listByLabel(kind);
-    if (ids && ids.length > 0) stillPresent.push({ kind, count: ids.length });
+    if (ids === null) stillPresent.push({ kind, reason: "absence could not be verified" });
+    else if (ids.length > 0) stillPresent.push({ kind, count: ids.length });
   }
-  if (stillPresent.length > 0) {
+  if (stillPresent.length > 0 || remaining.length > 0) {
     return {
       ok: false,
       reason: "the resources of the execution are still present",
       removed,
-      remaining: stillPresent,
+      remaining: [...remaining, ...stillPresent],
     };
   }
 
@@ -750,6 +758,28 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
   }
 
   return { ok: true, removed, remaining: [] };
+}
+
+function preserveClosure(cwd, record, reason) {
+  // A retry/cancel must not replace the original runtime observations.
+  const directory = reportDir(cwd);
+  if (!directory.ok) return directory;
+  const existing = join(directory.dir, `${record.executionId}.json`);
+  if (existsSync(existing)) {
+    try {
+      const original = JSON.parse(readFileSync(existing, "utf8"));
+      if (original.executionId !== record.executionId || !RESULT_STATES.includes(original.result)) throw new Error("invalid report");
+      record.reportPath = existing;
+      return { ok: true, path: existing };
+    } catch {
+      return { ok: false, reason: "existing execution evidence could not be verified; resources are preserved" };
+    }
+  }
+  const report = buildReport(record, { result: record.result ?? "not executed", steps: [reason], differencesFromProduction: [] });
+  if (!report.ok) return report;
+  const saved = writeReport(cwd, record.executionId, report.report);
+  if (saved.ok) record.reportPath = saved.path;
+  return saved;
 }
 
 /**
@@ -777,6 +807,8 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
     if (!verified.ok) return { ok: false, reason: verified.reason };
   }
 
+  const evidence = preserveClosure(cwd, record.record, "execution cancelled");
+  if (!evidence.ok) return { ...evidence, quotaReleased: false };
   const cleanup = cleanupExecution(cwd, executionId, deps);
   if (!cleanup.ok) {
     record.record.phase = "cleanup-pending";
@@ -862,6 +894,8 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
     }
   }
 
+  const evidence = preserveClosure(cwd, record.record, "interrupted execution recovery");
+  if (!evidence.ok) return { ...evidence, quotaReleased: false };
   const cleanup = cleanupExecution(cwd, executionId, deps);
   if (!cleanup.ok) {
     record.record.phase = "cleanup-pending";
@@ -919,7 +953,7 @@ export function closeExpiredExecution(cwd, executionId, deps = {}) {
   return finishSandbox(
     cwd,
     executionId,
-    { result: "not executed", steps: [], differencesFromProduction: ["the agreed maximum duration expired"] },
+    { result: "not executed", token: deps.token ?? null, steps: [], differencesFromProduction: ["the agreed maximum duration expired"] },
     deps,
   );
 }

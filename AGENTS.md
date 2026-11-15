@@ -178,9 +178,21 @@ Three checks gate every change:
   skill surface, and CLI guarantees. Expect 11/11 to pass on a healthy
   checkout.
 
+Installed-state verification is separate from repository validation:
+`bash ./install.sh --check` uses the recorded installed profile without writes
+(exit 0 synchronized, 1 drift/conflicts, 2 invalid state/error). Run
+`node --test scripts/test-resource-manifest.mjs scripts/test-installation-state.mjs`
+for the temporary-home installation fixtures. The shared inventory protects
+foreign/modified resources; incomplete applications preserve a journal and
+block retries. See `docs/contracts/installation-resources.md` for migration,
+recovery, activation, and the distinction between distribution and runtime.
+
 ## Doctor
 
 `/doctor` (or `node scripts/doctor.mjs --check-only`) reports the
-environment state. `--apply-safe` repairs the safe subset; everything that
+environment state using the shared installed-resource inventory and recognizing
+the regular rendered root. `--apply-safe` repairs owned absences only; modified
+links/files and missing ownership are not takeover opportunities. Its existing
+tooling-install behavior remains; everything that
 touches a disabled MCP, credentials, or a pending OpenSpec proposal is left
 to the operator.

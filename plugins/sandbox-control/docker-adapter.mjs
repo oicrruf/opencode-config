@@ -165,7 +165,7 @@ export function buildBuildArguments(input) {
     };
   }
 
-  const args = ["build", "--file", dockerfile];
+  const args = ["build", "--builder", "default", "--network", "none", "--pull=false", "--file", dockerfile];
   if (stage) args.push("--target", stage);
   args.push("--tag", imageTag);
   args.push("--label", `${LABEL_KEY}=${executionId}`);
@@ -250,7 +250,7 @@ export function buildRunArguments(input) {
         reason: `the port publication must bind the loopback interface only: ${container}:${host}`,
       };
     }
-    args.push("--publish", `${container}:${host}:${port.hostPort ?? container}`);
+    args.push("--publish", `${host}:${port.hostPort ?? container}:${container}`);
   }
 
   if (envFile) args.push("--env-file", envFile);

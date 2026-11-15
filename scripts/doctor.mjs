@@ -19,9 +19,10 @@
 // The script is intentionally provider-agnostic. It MUST NOT call
 // mmx, codex, ollama, or any model CLI.
 
-import { existsSync, readFileSync, lstatSync, symlinkSync, renameSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, accessSync, constants } from 'node:fs';
+import { createPlan, applyPlan } from './resource-manifest.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { dirname, join, relative, basename } from 'node:path';
+import { dirname, join, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir, platform } from 'node:os';
 
@@ -30,6 +31,10 @@ const repoDir = dirname(here);
 const configDir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'opencode');
 
 const args = new Set(process.argv.slice(2));
+if ([...args].some(a => !['--check-only', '--apply-safe', '--dry-run'].includes(a)) ||
+    (args.has('--check-only') && args.has('--apply-safe'))) {
+  console.error('doctor: invalid or conflicting arguments'); process.exit(2);
+}
 const checkOnly = args.has('--check-only') || !args.has('--apply-safe');
 const applySafe = args.has('--apply-safe');
 const dryRun = args.has('--dry-run');
@@ -51,10 +56,16 @@ function approve(area, message) { findings.push({ level: 'requires-approval', ar
 
 // ---- 1. OpenSpec CLI -------------------------------------------------------
 
-function detectOpenspec() {
-  const r = spawnSync('command', ['-v', 'openspec'], { encoding: 'utf8' });
-  return r.status === 0;
+function executablePresent(bin) {
+  const suffixes = process.platform === 'win32' ? (process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';') : [''];
+  for (const dir of (process.env.PATH || '').split(delimiter).filter(Boolean)) {
+    for (const suffix of suffixes) {
+      try { accessSync(join(dir, bin + suffix), constants.X_OK); return true; } catch {}
+    }
+  }
+  return false;
 }
+function detectOpenspec() { return executablePresent('openspec'); }
 
 if (detectOpenspec()) {
   ok('dependencies', 'openspec CLI found on PATH');
@@ -73,8 +84,7 @@ const toolDeps = [
 
 const os = platform(); // 'darwin', 'linux', 'win32', ...
 for (const dep of toolDeps) {
-  const r = spawnSync('command', ['-v', dep.bin], { encoding: 'utf8' });
-  if (r.status === 0) {
+  if (executablePresent(dep.bin)) {
     ok('dependencies', `${dep.bin} found on PATH`);
     continue;
   }
@@ -104,95 +114,36 @@ for (const dep of toolDeps) {
   fail('dependencies', `${dep.bin} missing — repair with \`/doctor\` (--apply-safe) or install manually`);
 }
 
-// ---- 3. Symlinks under ~/.config/opencode ----------------------------------
-
-const linkEntries = [
-  'opencode.jsonc',
-  'agents',
-  'commands',
-  'skills',
-  'tui.jsonc',
-  'herdr-tui-session.js',
-  'quota-tui.tsx',
-  'plugins/herdr-agent-state.js',
-  'plugins/worktree-control.js',
-];
-
-if (!existsSync(configDir)) {
-  fail('symlinks', `${configDir} does not exist — run install.sh first`);
-} else {
-  for (const entry of linkEntries) {
-    const target = join(configDir, entry);
-    const source = join(repoDir, entry);
-    const exists = existsSync(target);
-    // `lstatSync` (not `statSync`) so we inspect the link itself, not the
-    // target it points at. `statSync` follows the link and reports the
-    // target's properties, which would make a valid symlink look like a
-    // regular file or directory.
-    const isLink = exists ? lstatSync(target).isSymbolicLink() : false;
-
-    if (!exists) {
-      if (applySafe && !dryRun) {
-        mkdirSync(dirname(target), { recursive: true });
-        if (existsSync(source)) {
-          try {
-            symlinkSync(source, target);
-            ok('symlinks', `linked ${entry} → ${relative(configDir, source)}`);
-          } catch (err) {
-            fail('symlinks', `could not link ${entry}: ${err.message}`);
-          }
-          continue;
-        }
-        fail('symlinks', `${entry} missing in clone; cannot recreate link`);
-        continue;
-      }
-      if (applySafe && dryRun) {
-        warn('symlinks', `--dry-run would create symlink ${entry} → ${relative(configDir, source)}`);
-        continue;
-      }
-      fail('symlinks', `${entry} missing under ${configDir} — repair with \`/doctor --apply-safe\``);
-      continue;
-    }
-
-    if (isLink) {
-      ok('symlinks', `${entry} symlink OK`);
-      continue;
-    }
-
-    // Exists but is not a symlink — the repair path is to back it up and
-    // replace it with the canonical symlink, matching install.sh's `link`
-    // helper. --apply-safe does it; --check-only surfaces it as fail.
-    if (applySafe && !dryRun) {
-      const backup = `${target}.bak.${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`;
-      try {
-        renameSync(target, backup);
-        if (existsSync(source)) {
-          symlinkSync(source, target);
-          ok('symlinks', `replaced non-symlink ${entry} with symlink → ${relative(configDir, source)} (backup at ${basename(backup)})`);
-        } else {
-          fail('symlinks', `${entry} missing in clone; backed up to ${basename(backup)} but no source to link`);
-        }
-      } catch (err) {
-        fail('symlinks', `could not repair ${entry}: ${err.message}`);
-      }
-      continue;
-    }
-    if (applySafe && dryRun) {
-      warn('symlinks', `--dry-run would replace non-symlink ${entry} with symlink → ${relative(configDir, source)} (timestamped backup)`);
-      continue;
-    }
-    fail('symlinks', `${entry} exists but is not a symlink; repair with \`/doctor --apply-safe\``);
+// ---- 3. Shared installed-state inspection and safe resource repair ----------
+const validationReport = runValidator();
+let installedPlan = null;
+try {
+  installedPlan = createPlan({ repoRoot: repoDir, configDir, check: true, repairOnly: applySafe });
+  if (applySafe && !dryRun && validationReport.status === 0 && installedPlan.previous && !installedPlan.conflicts.length) {
+    // Repair only absent owned resources. Drift/adoption/update conflicts never
+    // become a backup-and-takeover operation through doctor.
+    applyPlan(installedPlan);
+    installedPlan = createPlan({ repoRoot: repoDir, configDir, check: true });
   }
+  if (!installedPlan.previous) fail('resources', 'ownership manifest missing — run install.sh to inspect and migrate');
+  for (const action of installedPlan.actions) {
+    if (action.action === 'keep') ok('resources', `${action.id}: identity verified (${action.kind})`);
+    else if (dryRun && action.action === 'create' && installedPlan.previous) warn('resources', `--dry-run would recreate owned absence: ${action.id}`);
+    else fail('resources', `${action.id}: ${action.action} — ${action.reason}`);
+  }
+  warn('plugins', 'distribution inspected; runtime loading is not verified by doctor');
+} catch (error) {
+  fail('resources', error.message);
 }
 
 // ---- 4. Configuration validator -------------------------------------------
 
 function runValidator() {
-  const r = spawnSync('node', [join(repoDir, 'scripts/validate-config.mjs')], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [join(repoDir, 'scripts/validate-config.mjs')], { encoding: 'utf8' });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
-const validator = runValidator();
+const validator = validationReport;
 if (validator.status === 0) {
   ok('config', 'validate-config.mjs passed');
 } else {
@@ -232,13 +183,13 @@ function readJsonc(file) {
   return JSON.parse(stripped);
 }
 
-const cfgPath = join(repoDir, 'opencode.jsonc');
-if (existsSync(cfgPath)) {
+const cfgPath = join(configDir, 'opencode.jsonc');
+if (installedPlan?.actions.find(a => a.id === 'opencode.jsonc')?.before.kind === 'file') {
   let cfg;
   try {
     cfg = readJsonc(cfgPath);
   } catch (err) {
-    fail('mcp', `opencode.jsonc not parseable: ${err.message}`);
+    fail('mcp', 'installed opencode.jsonc is not parseable');
   }
   if (cfg && cfg.mcp) {
     const agentPerms = JSON.stringify(Object.values(cfg.agent || {}).map((a) => a && a.permission));
@@ -256,7 +207,7 @@ if (existsSync(cfgPath)) {
     }
   }
 } else {
-  fail('mcp', `${cfgPath} missing — clone incomplete`);
+  fail('mcp', `${cfgPath} unavailable as a regular rendered root`);
 }
 
 // ---- 7. Render report -----------------------------------------------------

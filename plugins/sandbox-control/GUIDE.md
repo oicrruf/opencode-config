@@ -11,9 +11,12 @@ production. Starting the environment is not an approval.
 
 ## Prerequisites
 
-- A local Docker engine on Linux or WSL2. The isolation boundary is
-  expressed with Docker's own flags, so there is no equivalent on
-  macOS or on Windows outside WSL2.
+- A local Linux Docker engine on Linux/WSL2, or Docker Desktop on macOS
+  with a verified local Unix socket and Linux containers. Native Windows,
+  other macOS engines and remote Docker endpoints are not supported.
+- Preflight resolves the effective context/DOCKER_HOST, verifies socket and
+  daemon metadata without creating resources, and rejects uncertain identity.
+  A CLI version or a context named desktop-linux alone is not proof.
 - A Node.js runtime that can load the plugin. The plugin itself needs no
   native dependency.
 - A project that declares its build configuration.
@@ -194,7 +197,15 @@ starts a second test for it, and never acts on another execution.
 
 ## The limits
 
-- The sandbox requires Linux or WSL2.
+- The sandbox supports two client/engine combinations:
+
+- Linux (including WSL2) with a verified local Unix-socket Docker engine
+  running Linux containers. The engine does not need to identify as Docker Desktop.
+- macOS with a verified local Unix-socket endpoint and positively identified
+  Docker Desktop running Linux containers.
+
+Windows outside WSL2, remote endpoints and other macOS container engines are
+refused.
 - The sandbox does not provision dependencies. A missing service blocks
   the test; it is the developer's to prepare.
 - The sandbox does not support Compose, a Kubernetes context, or a
@@ -204,3 +215,35 @@ starts a second test for it, and never acts on another execution.
   capture.
 - The sandbox does not modify the host's branches, publish code, open a
   pull request, or integrate.
+
+
+## Local Docker Desktop binding
+
+New executions record the endpoint and daemon identity. Build, inspection,
+closure, cancellation, recovery and supervisor cleanup are pinned to that
+endpoint with contradictory ambient overrides removed. Every operation
+rechecks daemon identity; changing the default context does not redirect it.
+A restarted/different/unreachable daemon preserves resources and reservation.
+Older execution records without binding require explicit reconciliation;
+never adopt the current context or delete a reservation to bypass uncertainty.
+Rollback of Desktop support must preserve bindings needed to close old runs.
+
+The client may be macOS while containers use the verified Linux daemon.
+Evidence records that distinction without claiming native Linux or production
+equivalence. All original isolation restrictions remain: no Docker socket,
+no elevated privileges, no host network or original-source mount, internal
+network by default, loopback publication and declared resource limits.
+
+Prerequisites are inspected, not provisioned. A cached Node image does not
+prove an architecture-compatible OpenCode Linux executable is available.
+Fixtures must declare their Dockerfile and test runtime explicitly; missing
+images, binaries or services block the test rather than trigger downloads.
+
+
+Run `node scripts/probe-docker-desktop.mjs` for the declared cached-image
+prerequisite/isolation probe. It inspects the local image before building,
+uses sandbox-control for the container, and preserves observations and the
+closure report in its printed temporary repository. It never pulls an image.
+This probe is not the AT-188 installation/plugin-loading fixture. If its
+OpenCode Linux prerequisite is missing, AT-188 stays blocked; an operator must
+provide an already prepared compatible runtime before the real loading test.

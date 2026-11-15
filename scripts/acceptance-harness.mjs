@@ -26,6 +26,7 @@
 // Exit 0 when every test passes, 1 otherwise.
 
 import { readFileSync, existsSync, readdirSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { RESOURCE_SOURCES } from './resource-manifest.mjs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -212,19 +213,15 @@ check('committed wrapper skills remain strict rather than downgraded', () => {
   return 'archify is present and not git-ignored; missing committed targets remain validator failures';
 });
 
-check('install.sh creates the link target parent directory before symlinking', () => {
-  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
-  // The link() function in install.sh must create the target's parent
-  // directory so first-time installs on a fresh host do not abort with
-  // `ln: No such file or directory` when a subdirectory (notably plugins/)
-  // is missing. The `dirname --` defends against leading-dash targets.
-  assert(
-    /link\s*\(\)\s*\{[\s\S]*?dirname\s+--\s+"\$target"[\s\S]*?mkdir\s+-p\s+--\s+"\$target_dir"/.test(
-      installText,
-    ),
-    'install.sh link() must compute target_dir via `dirname -- "$target"` and `mkdir -p` it before `ln -sfn`',
-  );
-  return 'link() creates the target parent directory';
+check('shared installer ownership and preflight rules pass focused tests', () => {
+  const output = run(process.execPath, ['--test', join(repoRoot, 'scripts/test-resource-manifest.mjs')]);
+  assert(!/fail [1-9]/.test(output), 'resource ownership tests failed');
+  return 'validated inventory, foreign paths, idempotency, migration, journal and locking';
+});
+
+check('public installer and doctor preserve isolated operator configuration', () => {
+  run(process.execPath, ['--test', join(repoRoot, 'scripts/test-installation-state.mjs')]);
+  return 'temporary HOME/XDG: check, profiles, conflicts, doctor, help and installed plugin imports';
 });
 
 check('install.sh reports missing prerequisites before the Nerd Font step', () => {
@@ -988,6 +985,7 @@ check('the sandbox module tests pass without Docker', () => {
   assert(!/fail [1-9]/.test(out), `the reservation tests failed:\n${out}`);
   const capture = run(process.execPath, [join(dir, 'capture.test.mjs')]);
   assert(!/fail [1-9]/.test(capture), `the capture tests failed:\n${capture}`);
+  run(process.execPath, [join(dir, 'engine.test.mjs')]);
   const lifecycle = run(process.execPath, [join(dir, 'lifecycle.test.mjs')]);
   assert(!/fail [1-9]/.test(lifecycle), `the lifecycle tests failed:\n${lifecycle}`);
   const boundaries = run(process.execPath, [join(dir, 'boundaries.test.mjs')]);
@@ -1047,27 +1045,32 @@ check('the worktree plugin is present with its entry point', () => {
   return 'plugin and entry point are present';
 });
 
-check('the installer links the worktree plugin entry point', () => {
-  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
-  assert(installText.includes('link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"'),
-    'install.sh must link the worktree entry point into the global plugins directory');
-  const temporaryRoot = mkdtempSync(join(tmpdir(), 'worktree-plugin-install-'));
-  try {
-    const pluginDir = join(temporaryRoot, 'plugins');
-    mkdirSync(pluginDir);
-    const installedEntry = join(pluginDir, 'worktree-control.js');
-    symlinkSync(join(repoRoot, 'plugins', 'worktree-control', 'index.js'), installedEntry);
-    const script = `
-      const plugin = await import(${JSON.stringify(pathToFileURL(installedEntry).href)});
-      if (typeof plugin.WorktreeControlPlugin !== 'function') throw new Error('plugin entry point did not load');
+check('shared inventory installs importable sandbox and worktree entrypoints exactly once', () => {
+  assert(RESOURCE_SOURCES['plugins/worktree-control.js'] === 'plugins/worktree-control/index.js', 'worktree inventory entry missing');
+  assert(RESOURCE_SOURCES['plugins/sandbox-control.js'] === 'plugins/sandbox-control/index.js', 'sandbox inventory entry missing');
+  const script = `
+    import fs from 'node:fs';
+    import os from 'node:os';
+    import path from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    import { createPlan, applyPlan } from ${JSON.stringify(pathToFileURL(join(repoRoot, 'scripts/resource-manifest.mjs')).href)};
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-install-')));
+    try {
+      applyPlan(createPlan({repoRoot: ${JSON.stringify(repoRoot)}, configDir: path.join(dir, 'opencode')}));
+      const tools = new Set();
+      for (const [file, name] of [['sandbox-control.js', 'SandboxControlPlugin'], ['worktree-control.js', 'WorktreeControlPlugin']]) {
+        const module = await import(pathToFileURL(path.join(dir, 'opencode/plugins', file)).href);
+        const surface = await module[name]();
+        for (const name of Object.keys(surface.tool)) {
+          if (tools.has(name)) throw new Error('duplicate tool: ' + name);
+          tools.add(name);
+        }
+      }
       console.log('OK');
-    `;
-    const output = run(process.execPath, ['--input-type=module', '-e', script]);
-    assert(output.includes('OK'), `the installed plugin entry point did not load: ${output.trim()}`);
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
-  }
-  return 'the worktree plugin is installed at the global plugin entry point';
+    } finally { fs.rmSync(dir, {recursive:true, force:true}); }
+  `;
+  assert(run(process.execPath, ['--input-type=module', '-e', script]).includes('OK'), 'installed entrypoints failed import');
+  return 'temporary installation and imports verified; OpenCode runtime discovery remains separate';
 });
 
 check('the worktree inventory reconciles and the capacity announces no limit', () => {

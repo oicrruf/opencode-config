@@ -39,6 +39,7 @@ import { join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { RESOURCE_SOURCES, validateResourceInventory } from './resource-manifest.mjs';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
@@ -400,7 +401,7 @@ function runWorktreeSurfaceChecks() {
   const installPath = join(repoRoot, 'install.sh');
   if (existsSync(installPath)) {
     const installText = readFileSync(installPath, 'utf8');
-    if (!installText.includes('link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"')) {
+    if (!installText.includes('resource-manifest.mjs') || RESOURCE_SOURCES['plugins/worktree-control.js'] !== 'plugins/worktree-control/index.js') {
       fail(installPath, 'install.sh does not link the worktree control plugin entry point');
     }
   }
@@ -560,11 +561,13 @@ function runInstallScriptChecks() {
     if (!installText.includes('validate-config.mjs')) {
       fail(installPath, 'install.sh does not call scripts/validate-config.mjs');
     }
-    const validatorIdx = installText.indexOf('validate-config.mjs');
-    const firstLinkIdx = installText.indexOf('link "$repo_dir/');
-    if (firstLinkIdx !== -1 && validatorIdx > firstLinkIdx) {
-      fail(installPath, 'validator must run before the first link call in install.sh');
-    }
+    const validatorIdx = installText.indexOf('if [ -f "$repo_dir/scripts/validate-config.mjs" ]');
+    const applyIdx = installText.indexOf('"${helper_args[@]}" --preflight');
+    if (validatorIdx < 0 || applyIdx < validatorIdx) fail(installPath, 'source validation must precede resource-manifest preflight/application');
+    if (!installText.includes('--check') || !installText.includes('resource-manifest.mjs')) fail(installPath, 'shared resource planner and --check are required');
+    if (/ln\s+-sfn|function\s+link|link\s*\(\)/.test(installText)) fail(installPath, 'installer must not bypass shared resource ownership with link logic');
+    try { validateResourceInventory(RESOURCE_SOURCES, repoRoot); }
+    catch (error) { fail(installPath, error.message); }
   }
 }
 

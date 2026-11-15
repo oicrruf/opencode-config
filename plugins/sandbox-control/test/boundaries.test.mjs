@@ -15,6 +15,7 @@
 //   5. A source that changes while the capture is taken is refused.
 
 import { test } from "node:test";
+import { withEngineStub } from "./engine-fixture.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,12 +55,10 @@ function prepareProject(dir, extra = {}) {
 }
 
 function dockerStub() {
-  return {
-    execFileSync: (cmd, args) => {
+  return withEngineStub((cmd, args) => {
       if (args[0] === "version") return "27.0.0\n";
       return "";
-    },
-  };
+  });
 }
 
 test("the quota is acquired exclusively", () => {
@@ -232,5 +231,19 @@ test("a capture of a stable source is accepted", () => {
     });
     assert.equal(capture.ok, true);
     assert.ok(existsSync(join(capture.destination, "tracked.txt")));
+  });
+});
+
+test('remote effective endpoint blocks start before reservation or capture', async () => {
+  await withRepo(async dir => {
+    prepareProject(dir);
+    const calls = [];
+    const docker = withEngineStub((...args) => { calls.push(args); return ''; });
+    const result = await startSandbox({ workId: 'remote', workName: 'remote', cwd: dir, worktreePath: dir },
+      { ...docker, platform: 'darwin', env: { DOCKER_HOST: 'ssh://remote' } });
+    assert.equal(result.blocked, true);
+    assert.equal(readReservation(dir).state, 'free');
+    assert.equal(calls.length, 0);
+    assert.equal(existsSync(join(dir, '.opencode/state/sandbox/captures')), false);
   });
 });

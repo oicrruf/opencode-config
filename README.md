@@ -18,10 +18,11 @@ The installer creates symbolic links under `~/.config/opencode` for the
 `herdr-tui-session.js` paths. The root `opencode.jsonc` is rendered from
 `config/opencode.template.jsonc` and the selected profile in
 `config/model-profiles.json`; the installer writes it directly rather than
-symlinking it. The previous root config is backed up to
-`opencode.jsonc.bak.<timestamp>` when the renderer overwrites it. The
-installer refuses to replace existing non-link paths. The Herdr-managed
-plugin is left untouched.
+symlinking it. A previous owned root config is backed up to
+`opencode.jsonc.bak.<uuid>` when it changes. Foreign resources and local
+modifications block installation before destinations are changed. Both
+worktree-control and sandbox-control entrypoints are installed from the shared
+inventory; externally managed Herdr resources are preserved.
 
 The `mmx-cli` skill is an optional, local-only checkout and is not included in
 this repository. On a fresh clone, installation succeeds with a warning that
@@ -56,6 +57,25 @@ change under `openspec/changes/<name>/`, declare the profile in the
 manifest, validate with `node scripts/validate-config.mjs --profile <name>`,
 then archive. The validator rejects profiles with missing consumers or
 phantom IDs before any installed configuration is touched.
+
+### Installed-state check and ownership
+
+```bash
+./install.sh --check                  # use the installed profile, write nothing
+./install.sh --check --profile work   # compare without activating work
+```
+
+Exit codes: **0** synchronized, **1** differences/conflicts, **2** invalid
+arguments/state or operational error. The installer records ownership in
+`.opencode-resource-manifest.json`; it never backs up and replaces an unowned
+or modified resource. Without a manifest, only exact legacy artifacts can be
+adopted. Modified obsolete artifacts remain visible as pending; the manifest
+protects whole links, not individual files inside linked trees.
+
+See [installed-resource ownership](docs/contracts/installation-resources.md)
+for conflict handling, migration, partial-failure journals, doctor behavior,
+activation and conservative rollback. Distribution/import checks do not prove
+that OpenCode loaded the plugins at runtime.
 
 ### Autonomous execution
 
@@ -189,7 +209,8 @@ install.sh: FAIL — gate acceptance-harness failed; rerun with OPENCODE_SKIP_AC
 ### Per-gate opt-outs
 
 Set any of these to `1` before running `install.sh` to bypass a single gate.
-Skipped gates do not cause a non-zero exit.
+Skipped gates do not cause a non-zero exit, but print `install.sh: PARTIAL`
+with counts and `verification incomplete` instead of the full-success line.
 
 | Env var                          | Effect                                                   |
 |----------------------------------|----------------------------------------------------------|
@@ -369,19 +390,20 @@ pulling changes, or whenever a command complains about missing tools.
   found. Never installs anything and never relinks.
 - `/doctor --apply-safe` or `node scripts/doctor.mjs --apply-safe` —
   installs missing `lazygit`/`lazydocker` via the detected package
-  manager, recreates missing `~/.config/opencode/<entry>` symlinks
-  from the clone, and re-runs `scripts/validate-config.mjs`. Add
+  manager, recreates only absent resources with validated ownership
+  (including the regular rendered root), and re-runs `scripts/validate-config.mjs`. Add
   `--dry-run` to print the actions without executing them. The
-  repairs are idempotent.
+  repairs are idempotent. Changed or unowned files/links are preserved;
+  doctor does not bootstrap a missing manifest.
 
 ### What the report covers
 
 - **Tooling prerequisites** — `lazygit`, `lazydocker`, `openspec`,
   `codegraph`, `serena`. Missing entries are `fail`; the report
   prints the matching remediation line.
-- **Symlinks under `~/.config/opencode`** — every entry that
-  `install.sh` links is checked; missing or non-symlink paths are
-  `fail`.
+- **Installed resources** — the shared inventory checks the regular
+  root against its profile/digest, link origins, missing plugins, conflicts
+  and competing root files. It distinguishes distribution from runtime loading.
 - **OpenSpec change state** — any change with pending tasks is
   reported as `requires-approval` with the exact `/opsx-apply <name>`
   invocation. The doctor never applies an OpenSpec change on its
@@ -404,15 +426,17 @@ links are always created regardless of the warning.
 git -C ~/Projects/opencode-config pull --ff-only
 ```
 
-The links point to the clone, so no reinstall is needed after a successful
-pull. Restart OpenCode to use the update.
+The links point to the clone, so content updates reach linked resources.
+Run `./install.sh --check` after pulling; if the root or inventory changed,
+reinstall the intended profile after resolving any conflicts. Restart OpenCode
+to load the update.
 
 ### Switching profiles
 
 Re-running the installer with a different `--profile` re-renders the root
 config from the new profile and atomically replaces the installed
 `opencode.jsonc`. The previous root config is backed up to
-`opencode.jsonc.bak.<timestamp>`. The other symlinked resources (agents,
+`opencode.jsonc.bak.<uuid>`. The other symlinked resources (agents,
 commands, skills, plugins, TUI) are unchanged.
 
 ```bash

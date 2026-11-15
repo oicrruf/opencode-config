@@ -18,6 +18,7 @@
 //      other execution.
 
 import { test } from "node:test";
+import { withEngineStub } from "./engine-fixture.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +57,7 @@ function withRepo(run) {
   }
 }
 
-function prepareProject(dir) {
+function prepareProject(dir, { include = [] } = {}) {
   mkdirSync(join(dir, ".opencode"), { recursive: true });
   mkdirSync(join(dir, "app"), { recursive: true });
   writeFileSync(join(dir, "Dockerfile"), "FROM scratch\n");
@@ -68,8 +69,10 @@ function prepareProject(dir) {
       context: ".",
       stage: "test",
       ports: [{ container: 8080, host: "127.0.0.1", hostPort: 18080 }],
+      include,
     }),
   );
+  if (include.includes("opencode.json")) writeFileSync(join(dir, "opencode.json"), '{"plugins":[]}\n');
 }
 
 // A Docker stub that records the calls it received and reports the
@@ -121,7 +124,7 @@ function dockerStub(state = {}) {
     }
     return "";
   };
-  return { execFileSync, calls, present };
+  return { ...withEngineStub(execFileSync), calls, present };
 }
 
 test("a work name is normalized for use in a resource name", () => {
@@ -163,6 +166,18 @@ test("the start returns a pending manual test and a distinct identity", async ()
     assert.ok(runCall, "the container was not started");
     assert.ok(!runCall.includes("--network host"));
     assert.ok(!runCall.includes("--privileged"));
+  });
+});
+
+test("the declared capture include is honored during a sandbox start", async () => {
+  await withRepo(async (dir) => {
+    prepareProject(dir, { include: ["opencode.json"] });
+    const result = await startSandbox(
+      { workId: "work-include", workName: "include", worktreePath: dir, cwd: dir },
+      { ...dockerStub(), platform: "linux", release: "6.1.0" },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(readFileSync(join(result.execution.capture.destination, "opencode.json"), "utf8"), '{"plugins":[]}\n');
   });
 });
 
@@ -319,16 +334,14 @@ test("a cleanup that cannot remove everything keeps the quota", async () => {
     prepareProject(dir);
     // The listing always reports a container, so the absence check
     // never succeeds.
-    const docker = {
-      execFileSync: (cmd, args) => {
+    const docker = withEngineStub((cmd, args) => {
         if (args[0] === "ps") return "leftover-container\n";
         if (args[0] === "ls") return "leftover-container\n";
         if (args[0] === "version") return "27.0.0\n";
         // The build and the start succeed; only the removal fails.
         if (args[0] === "build" || args[0] === "run" || args[0] === "network") return "";
         throw new Error("the resource could not be removed");
-      },
-    };
+    });
     const started = await startSandbox(
       { workId: "work-1", workName: "my work", worktreePath: dir, cwd: dir },
       { ...docker, platform: "linux", release: "6.1.0" },
@@ -452,5 +465,87 @@ test("the execution record round-trips", async () => {
     const read = readExecutionRecord(dir, "exec-1");
     assert.equal(read.ok, true);
     assert.equal(read.record.phase, "running");
+  });
+});
+
+// Desktop 2.2: identity changes must block removals and preserve the owner's quota.
+test("changed engine identity blocks cleanup without releasing reservation", async () => {
+  await withRepo(async dir => {
+    prepareProject(dir); const docker = dockerStub();
+    const started = await startSandbox({workId:"binding", workName:"binding", worktreePath:dir, cwd:dir}, {...docker, platform:"darwin"});
+    assert.equal(started.ok, true);
+    const changed = {...docker, execFileSync(cmd,args,options) {
+      if (args[0] === "info") return ["different-daemon","linux","Docker Desktop","29.7.2","aarch64"].map(JSON.stringify).join("|");
+      return docker.execFileSync(cmd,args,options);
+    }};
+    const before = docker.calls.filter(c => /docker (?:rm|network rm|image rm|volume rm)/.test(c)).length;
+    const closed = finishSandbox(dir, started.execution.executionId, {result:"passed",steps:[],token:started.token}, changed);
+    assert.equal(closed.quotaReleased, false); assert.equal(closed.cleanup.ok, false);
+    assert.equal(readReservation(dir).state,"held");
+    assert.equal(docker.calls.filter(c => /docker (?:rm|network rm|image rm|volume rm)/.test(c)).length,before);
+  });
+});
+// Desktop 2.3: old records cannot inherit a potentially unrelated ambient daemon.
+test("legacy record without binding blocks recovery before Docker operations", async () => {
+  await withRepo(async dir => {
+    const record = {executionId:"legacy",workId:"legacy",workName:"legacy",phase:"running",result:null,tokenRequired:false};
+    writeExecutionRecord(dir,record); const docker = dockerStub();
+    const recovered = recoverSandbox(dir,"legacy",docker);
+    assert.equal(recovered.ok,false); assert.match(recovered.reason,/no verified engine binding/);
+    assert.equal(docker.calls.length,0);
+  });
+});
+
+test('a fresh coordinator closes the recorded Desktop engine despite remote context changes', async () => {
+  await withRepo(async dir => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const started = await startSandbox({ workId: 'desktop', workName: 'desktop', cwd: dir, worktreePath: dir }, { ...docker, platform: 'darwin' });
+    assert.equal(started.ok, true);
+    const finished = finishSandbox(dir, started.execution.executionId,
+      { result: 'passed', token: started.token },
+      { ...docker, env: { DOCKER_CONTEXT: 'remote', DOCKER_HOST: 'ssh://remote' } });
+    assert.equal(finished.cleanup.ok, true);
+    assert.equal(finished.quotaReleased, true);
+  });
+});
+
+test('an unreachable bound daemon preserves quota for cancel, recovery and expired supervisor closure', async () => {
+  const { closeExpiredExecution } = await import('../lifecycle.mjs');
+  await withRepo(async dir => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const started = await startSandbox({ workId: 'deadline', workName: 'deadline', cwd: dir, worktreePath: dir, maxDurationSeconds: -1 }, docker);
+    assert.equal(started.ok, true);
+    const unavailable = { ...docker, token: started.token, lstatSync() { throw new Error('unavailable'); } };
+    for (const close of [
+      () => cancelSandbox(dir, started.execution.executionId, { token: started.token }, unavailable),
+      () => recoverSandbox(dir, started.execution.executionId, unavailable),
+      () => closeExpiredExecution(dir, started.execution.executionId, unavailable),
+    ]) {
+      const before = docker.calls.length;
+      const closed = close();
+      assert.equal(closed.quotaReleased, false);
+      assert.equal(docker.calls.length, before);
+      assert.equal(readReservation(dir).state, 'held');
+    }
+  });
+});
+
+test('recover and cancel retain original runtime evidence after cleanup was blocked', async () => {
+  for (const action of ['recover', 'cancel']) await withRepo(async dir => {
+    prepareProject(dir);
+    const docker = dockerStub();
+    const started = await startSandbox({ workId: 'evidence', workName: 'evidence', cwd: dir, worktreePath: dir }, docker);
+    const unavailable = { ...docker, lstatSync() { throw new Error('unavailable'); } };
+    const finished = finishSandbox(dir, started.execution.executionId, { result: 'passed', token: started.token,
+      steps: ['actual runtime observation'], differencesFromProduction: ['prepared database'] }, unavailable);
+    assert.equal(finished.cleanup.ok, false);
+    const original = readFileSync(finished.reportPath, 'utf8');
+    const close = action === 'recover'
+      ? () => recoverSandbox(dir, started.execution.executionId, { ...unavailable, token: started.token })
+      : () => cancelSandbox(dir, started.execution.executionId, { token: started.token }, unavailable);
+    assert.equal(close().quotaReleased, false);
+    assert.equal(readFileSync(finished.reportPath, 'utf8'), original);
   });
 });

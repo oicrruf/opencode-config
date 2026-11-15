@@ -14,6 +14,7 @@ import { reportCapacity } from "./capacity.mjs";
 import { describeLock } from "./lock.mjs";
 import { retireWorktree, listRetirementCandidates } from "./lifecycle.mjs";
 import { resolveProjectRoot, resolveProjectId, resolveWorktreeRoot } from "./paths.mjs";
+import { registerV2Tools } from "../plugin-v2-adapter.mjs";
 
 /**
  * The worktree API of the session, when it is available.
@@ -32,7 +33,7 @@ function projectContext(context) {
   const cwd = context?.directory ?? process.cwd();
   const project = resolveProjectRoot(cwd);
   if (!project.ok) return { ok: false, reason: project.reason, cwd };
-  const projectId = resolveProjectId(project.root);
+  const projectId = context?.projectID ?? resolveProjectId(project.root);
   return {
     ok: true,
     cwd,
@@ -51,7 +52,7 @@ export const WorktreeControlPlugin = async () => {
           "canonical checkout, with its branch, and is recorded in the project's inventory. " +
           "A repeated request for the same work returns the existing worktree instead of creating a second one.",
         args: {
-          workId: { type: "string", description: "the identifier of the work to isolate" },
+          workId: { type: "string", description: "the identifier of the work to isolate", required: true },
           branch: { type: "string", description: "the branch to create with the worktree" },
         },
         async execute(args, context) {
@@ -150,11 +151,11 @@ export const WorktreeControlPlugin = async () => {
           "a process with access, unrecognized ignored files, or an unsafe path. " +
           "The remote branch and the published commits are never removed.",
         args: {
-          worktree: { type: "string", description: "the directory of the worktree to retire" },
-          branch: { type: "string", description: "the branch of the worktree" },
-          base: { type: "string", description: "the base the work integrates into" },
-          head: { type: "string", description: "the expected head of the worktree" },
-          evidence: { type: "string", description: "the evidence that the work was integrated" },
+          worktree: { type: "string", description: "the directory of the worktree to retire", required: true },
+          branch: { type: "string", description: "the branch of the worktree", required: true },
+          base: { type: "string", description: "the base the work integrates into", required: true },
+          head: { type: "string", description: "the expected head of the worktree", required: true },
+          evidence: { type: "string", description: "the evidence that the work was integrated", required: true },
           worktreeName: { type: "string", description: "the name of the worktree, used for the evidence directory" },
         },
         async execute(args, context) {
@@ -213,4 +214,11 @@ export const WorktreeControlPlugin = async () => {
       },
     },
   };
+};
+
+export default {
+  id: "opencode-config.worktree-control",
+  async setup(ctx) {
+    return registerV2Tools(ctx, "opencode-config.worktree-control", WorktreeControlPlugin, { worktree: true });
+  },
 };

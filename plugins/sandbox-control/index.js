@@ -20,7 +20,8 @@ import {
   disarmSupervisor,
 } from "./execution.mjs";
 import { readSandboxConfig } from "./sandbox-config.mjs";
-import { checkEngineHost, checkEngineReachable } from "./docker-adapter.mjs";
+import { inspectLocalEngine } from "./engine.mjs";
+import { registerV2Tools } from "../plugin-v2-adapter.mjs";
 
 const SANDBOX_DESCRIPTION =
   "Build and test an independent capture of the work under test in an isolated local Docker container. " +
@@ -46,9 +47,9 @@ export const SandboxControlPlugin = async () => {
       sandbox_start: {
         description: SANDBOX_DESCRIPTION,
         args: {
-          workId: { type: "string", description: "the identifier of the work under test" },
-          workName: { type: "string", description: "the name of the work, used for the resource names" },
-          worktreePath: { type: "string", description: "the managed worktree that holds the work" },
+          workId: { type: "string", description: "the identifier of the work under test", required: true },
+          workName: { type: "string", description: "the name of the work, used for the resource names", required: true },
+          worktreePath: { type: "string", description: "the managed worktree that holds the work", required: true },
           maxDurationSeconds: {
             type: "number",
             description: "the maximum duration of the execution; no timeout is applied when it is absent",
@@ -71,7 +72,7 @@ export const SandboxControlPlugin = async () => {
           "Report the identity, the phase, and the visible conditions of a sandbox execution. " +
           "A ready environment is not an approved test.",
         args: {
-          executionId: { type: "string", description: "the identity of the execution" },
+          executionId: { type: "string", description: "the identity of the execution", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -84,17 +85,18 @@ export const SandboxControlPlugin = async () => {
           "Conclude a sandbox execution with an explicit result of passed, failed, blocked, or not executed. " +
           "The report is written outside the environment before any resource is removed.",
         args: {
-          executionId: { type: "string", description: "the identity of the execution" },
+          executionId: { type: "string", description: "the identity of the execution", required: true },
           result: {
             type: "string",
             description: "one of passed, failed, blocked, or not executed",
+            required: true,
           },
           steps: { type: "array", description: "the steps that were performed" },
           differencesFromProduction: {
             type: "array",
             description: "the conditions under which the test differs from production",
           },
-          token: { type: "string", description: "the token that owns the reservation" },
+          token: { type: "string", description: "the token that owns the reservation", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -111,9 +113,9 @@ export const SandboxControlPlugin = async () => {
         description:
           "Cancel a sandbox execution. The quota is kept until the resources of the execution are accounted for.",
         args: {
-          executionId: { type: "string", description: "the identity of the execution" },
+          executionId: { type: "string", description: "the identity of the execution", required: true },
           reason: { type: "string", description: "why the execution was cancelled" },
-          token: { type: "string", description: "the token that owns the reservation" },
+          token: { type: "string", description: "the token that owns the reservation", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -129,20 +131,21 @@ export const SandboxControlPlugin = async () => {
           "Resume the closure of an interrupted sandbox execution. The recovery never starts a second test " +
           "for the same execution and never acts on another execution.",
         args: {
-          executionId: { type: "string", description: "the identity of the execution" },
+          executionId: { type: "string", description: "the identity of the execution", required: true },
+          token: { type: "string", description: "the token that owns the reservation", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
-          return recoverSandbox(cwd, args?.executionId);
+          return recoverSandbox(cwd, args?.executionId, { token: args?.token ?? null });
         },
       },
 
       reservation_start: {
         description: RESERVATION_DESCRIPTION,
         args: {
-          workId: { type: "string", description: "the identifier of the work" },
+          workId: { type: "string", description: "the identifier of the work", required: true },
           workName: { type: "string", description: "the name of the work" },
-          executable: { type: "string", description: "the program to run, without a shell" },
+          executable: { type: "string", description: "the program to run, without a shell", required: true },
           args: { type: "array", description: "the arguments of the program" },
           cwd: { type: "string", description: "the directory the program runs in" },
         },
@@ -163,7 +166,7 @@ export const SandboxControlPlugin = async () => {
           "Stop the local application through the token that owns the reservation. Only the managed process " +
           "group is signalled, and the reservation is released only when the group is confirmed to be empty.",
         args: {
-          token: { type: "string", description: "the token that owns the reservation" },
+          token: { type: "string", description: "the token that owns the reservation", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -176,7 +179,7 @@ export const SandboxControlPlugin = async () => {
           "Recover an abandoned reservation. The recovery proceeds only when the exact owner is confirmed to " +
           "have ended and its process group is empty; it never proceeds on age alone.",
         args: {
-          token: { type: "string", description: "the token of the reservation to recover" },
+          token: { type: "string", description: "the token of the reservation to recover", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -195,8 +198,8 @@ export const SandboxControlPlugin = async () => {
         args: {},
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
-          const host = checkEngineHost();
-          const engine = host.ok ? checkEngineReachable() : { ok: false, reason: host.reason };
+          const engine = inspectLocalEngine();
+          const host = { ok: engine.ok, platform: process.platform };
           const config = readSandboxConfig(cwd);
           return {
             ok: true,
@@ -221,8 +224,8 @@ export const SandboxControlPlugin = async () => {
           "Inspect or disarm the independent deadline supervisor of an execution. The supervisor closes an " +
           "expired run without approving it.",
         args: {
-          executionId: { type: "string", description: "the identity of the execution" },
-          action: { type: "string", description: "either inspect or disarm" },
+          executionId: { type: "string", description: "the identity of the execution", required: true },
+          action: { type: "string", description: "either inspect or disarm", required: true },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -232,6 +235,13 @@ export const SandboxControlPlugin = async () => {
       },
     },
   };
+};
+
+export default {
+  id: "opencode-config.sandbox-control",
+  async setup(ctx) {
+    return registerV2Tools(ctx, "opencode-config.sandbox-control", SandboxControlPlugin);
+  },
 };
 
 export { armSupervisor, closeRemainingDescendants };

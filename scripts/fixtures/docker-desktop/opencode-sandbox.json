@@ -1,0 +1,8 @@
+{
+  "dockerfile": "Dockerfile",
+  "context": ".",
+  "stage": "probe",
+  "ports": [],
+  "limits": { "cpus": "1", "memory": "512m", "pids": 64 },
+  "include": ["opencode.json"]
+}
