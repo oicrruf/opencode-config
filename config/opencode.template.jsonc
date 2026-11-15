@@ -37,7 +37,6 @@
   },
   "agent": {
     "plan": {
-      "steps": 100,
       "permission": {
         "edit": "deny",
         "bash": { "*": "ask" },
@@ -62,7 +61,6 @@
       }
     },
     "build": {
-      "steps": 120,
       "permission": {
         "edit": "allow",
         "bash": "ask",

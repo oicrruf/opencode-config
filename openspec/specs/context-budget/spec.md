@@ -49,48 +49,26 @@ The system SHALL set `compaction.auto` to `true` and `compaction.prune` to
   2000 tokens of working room
 
 ### Requirement: Each agent declares a step budget
-The system SHALL set an explicit `steps` value for every agent defined in
-`opencode.jsonc`. The default budget per class is:
 
-| Class                                   | Default `steps` |
-|-----------------------------------------|-----------------|
-| `explore`                               | 25              |
-| `general`, `frontend`, `backend`        | 40              |
-| `build`                                 | 60              |
-| `plan`, `architect`, `refactor`, `orchestrator`, `adversarial`, `cotizador`, `p5t-installer` | 100 |
+The system SHALL distinguish primary continuity from bounded specialist execution. It SHALL omit `steps` for `build` and `plan`. Specialist budgets SHALL be 25 for `explore` and `triage`, 80 for `general`, `frontend`, and `backend`, 60 for `qa`, and 100 for `architect`, `orchestrator`, `refactor`, `adversarial`, `cotizador`, `p5t-installer`, and `doctor`. Agents with targeted/full modes SHALL declare the highest-mode budget. A ceiling is not a quota: completed bounded work SHALL stop early. Compaction SHALL remain independent of this policy and SHALL NOT be described as renewing a step allowance.
 
-OpenCode accepts exactly one `steps` value per agent, so an agent with
-`targeted` / `full` modes SHALL declare the budget of its **highest**
-mode. `steps` is a ceiling, not a quota: a targeted run SHALL stop when
-it has completed its declared bounded scope and SHALL NOT consume
-remaining iterations searching for unrelated findings.
-
-When a session reaches its step limit the agent SHALL emit a structured
-completion summary instead of looping. A targeted `adversarial` summary
-that is incomplete SHALL identify the final diff or scope examined,
-checks completed, material risk not verified, and the operator decision
-or next bounded check required.
+An incomplete specialist SHALL return evidence and pending work to its coordinator. A targeted adversarial summary SHALL identify the final diff or scope examined, checks completed, and material risk not verified. Existing review and permission gates SHALL remain authoritative.
 
 #### Scenario: explore stops at its budget
-
-- **WHEN** the `explore` agent has not produced a complete answer after 25
-  iterations
-- **THEN** it SHALL return a summary listing what was found, what was not,
-  and the next recommended action
+- **WHEN** explore has not completed its unit after 25 iterations
+- **THEN** it SHALL return findings, gaps, and the next recommended action to its coordinator
 
 #### Scenario: targeted adversarial review stops when scope is complete
-
-- **WHEN** `adversarial` has reviewed the final diff and directly affected
-  dependencies required by its targeted scope
-- **THEN** it SHALL return its verdict without spending remaining step
-  budget on unrelated audit axes
+- **WHEN** adversarial has reviewed the final diff and required dependencies
+- **THEN** it SHALL return its verdict without unrelated investigation
 
 #### Scenario: targeted adversarial review reaches its budget
+- **WHEN** adversarial cannot verify a material risk before exhausting its budget
+- **THEN** it SHALL return a structured incomplete summary without expanding to unrelated checks or restarting itself
 
-- **WHEN** `adversarial` reaches its step budget before it can verify a
-  material risk in targeted mode
-- **THEN** it SHALL return the required structured incomplete summary and
-  SHALL NOT continue by expanding to unrelated checks
+#### Scenario: primary work outlives a former ceiling
+- **WHEN** build or plan still has authorized work and is making progress beyond a previous fixed allowance
+- **THEN** it SHALL continue in the same turn without requiring the user to renew that allowance
 
 ### Requirement: Operational metrics are observable
 

@@ -1,17 +1,8 @@
 #!/usr/bin/env node
-// Structural exercise of the interruption-handoff fixture.
-//
-// Live runtime exhaustion cannot be exercised deterministically in
-// CI without an authenticated provider and a real model run, and the
-// design forbids lowering production defaults. This script exercises
-// the static contract: it reads AGENTS.md, agent/routing.md, the
-// fixture, and the agent prompt that would consume the fixture, and
-// confirms that the policy text and the fixture text agree on the
-// five required sections, the specialist structured fields, and the
-// runtime-exhaustion caveats.
-//
-// A pass here is necessary but not sufficient; the live observation
-// remains a follow-up. The script does not pretend otherwise.
+// Structural check of checkpoint and interruption handoff shapes.
+// This does not execute the runtime or prove model compliance. Use
+// test-autonomous-continuity.mjs for real-CLI loopback integration and
+// its explicit --live mode for an authenticated provider observation.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -97,5 +88,5 @@ if (failures.length > 0) {
   console.log(`\n${failures.length} check(s) failed`);
   process.exit(1);
 }
-console.log('\nall structural checks passed; live runtime observation remains a follow-up');
+console.log('\nall structural checks passed; see test-autonomous-continuity.mjs for runtime evidence');
 process.exit(0);
