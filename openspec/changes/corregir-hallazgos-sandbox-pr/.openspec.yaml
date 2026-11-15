@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-15
+goal: Keep sandbox capture, reporting, recovery, worktree routing, cleanup, and
+  deadline enforcement consistent with the adopted contracts.

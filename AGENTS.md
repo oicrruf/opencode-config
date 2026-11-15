@@ -65,6 +65,19 @@ validators.
   The `agent-routing` spec (`openspec/specs/agent-routing/spec.md`) is the
   contract for routing decisions; profile edits that change model
   assignments MUST keep the spec aligned.
+- **Runtime verification sandbox.** A change that can only be verified at
+  runtime is verified through the sandbox control
+  (`plugins/sandbox-control/`) instead of on the host. The sandbox takes
+  an independent capture of the work under test, runs it inside a local
+  Docker engine with no host network, no added privileges, no mount of
+  the original source, and loopback-only port publications, and writes
+  the report outside the environment before it removes anything. Two
+  rules bound its use: **one local application per project**, so a
+  second session is refused before anything launches, and **a missing
+  dependency blocks the test** rather than being provisioned by the
+  agent. Starting the environment never approves a product, and the
+  sandbox never modifies the host's branches or publishes code. The
+  operator guide is `plugins/sandbox-control/GUIDE.md`.
 - **Managed worktrees.** A change that needs an isolated workspace gets
   it through the managed worktree control (`plugins/worktree-control/`),
   never through a raw `git worktree add`. The control creates the worktree
@@ -165,9 +178,21 @@ Three checks gate every change:
   skill surface, and CLI guarantees. Expect 11/11 to pass on a healthy
   checkout.
 
+Installed-state verification is separate from repository validation:
+`bash ./install.sh --check` uses the recorded installed profile without writes
+(exit 0 synchronized, 1 drift/conflicts, 2 invalid state/error). Run
+`node --test scripts/test-resource-manifest.mjs scripts/test-installation-state.mjs`
+for the temporary-home installation fixtures. The shared inventory protects
+foreign/modified resources; incomplete applications preserve a journal and
+block retries. See `docs/contracts/installation-resources.md` for migration,
+recovery, activation, and the distinction between distribution and runtime.
+
 ## Doctor
 
 `/doctor` (or `node scripts/doctor.mjs --check-only`) reports the
-environment state. `--apply-safe` repairs the safe subset; everything that
+environment state using the shared installed-resource inventory and recognizing
+the regular rendered root. `--apply-safe` repairs owned absences only; modified
+links/files and missing ownership are not takeover opportunities. Its existing
+tooling-install behavior remains; everything that
 touches a disabled MCP, credentials, or a pending OpenSpec proposal is left
 to the operator.

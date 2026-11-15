@@ -26,6 +26,8 @@
 // Exit 0 when every test passes, 1 otherwise.
 
 import { readFileSync, existsSync, readdirSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { RESOURCE_SOURCES } from './resource-manifest.mjs';
+import { isExcluded } from '../plugins/sandbox-control/sandbox-capture.mjs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -91,7 +93,7 @@ function readFrontmatter(file) {
   return result;
 }
 
-const GROUP_ORDER = ['static', 'routing', 'skills', 'worktrees', 'wrappers'];
+const GROUP_ORDER = ['static', 'routing', 'skills', 'sandbox', 'worktrees', 'wrappers'];
 
 // ---------------------------------------------------------------------------
 // static
@@ -212,19 +214,15 @@ check('committed wrapper skills remain strict rather than downgraded', () => {
   return 'archify is present and not git-ignored; missing committed targets remain validator failures';
 });
 
-check('install.sh creates the link target parent directory before symlinking', () => {
-  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
-  // The link() function in install.sh must create the target's parent
-  // directory so first-time installs on a fresh host do not abort with
-  // `ln: No such file or directory` when a subdirectory (notably plugins/)
-  // is missing. The `dirname --` defends against leading-dash targets.
-  assert(
-    /link\s*\(\)\s*\{[\s\S]*?dirname\s+--\s+"\$target"[\s\S]*?mkdir\s+-p\s+--\s+"\$target_dir"/.test(
-      installText,
-    ),
-    'install.sh link() must compute target_dir via `dirname -- "$target"` and `mkdir -p` it before `ln -sfn`',
-  );
-  return 'link() creates the target parent directory';
+check('shared installer ownership and preflight rules pass focused tests', () => {
+  const output = run(process.execPath, ['--test', join(repoRoot, 'scripts/test-resource-manifest.mjs')]);
+  assert(!/fail [1-9]/.test(output), 'resource ownership tests failed');
+  return 'validated inventory, foreign paths, idempotency, migration, journal and locking';
+});
+
+check('public installer and doctor preserve isolated operator configuration', () => {
+  run(process.execPath, ['--test', join(repoRoot, 'scripts/test-installation-state.mjs')]);
+  return 'temporary HOME/XDG: check, profiles, conflicts, doctor, help and installed plugin imports';
 });
 
 check('install.sh reports missing prerequisites before the Nerd Font step', () => {
@@ -887,6 +885,127 @@ check('opsx-propose command does not use subtask (inherits default agent)', () =
 });
 
 // ---------------------------------------------------------------------------
+// sandbox
+// ---------------------------------------------------------------------------
+
+group('sandbox');
+
+check('the sandbox tool grants match the intended agents', () => {
+  // The sandbox control is granted to the agents that verify a change.
+  // The audit specialists, the explorers, and the read-only reviewers
+  // must not hold it: their value comes from an independent view of the
+  // change, and a sandbox in their context would blur that
+  // independence.
+  const cfg = readJsonc(join(repoRoot, 'opencode.jsonc'));
+  const granted = ['build', 'frontend', 'backend'];
+  const denied = ['qa', 'adversarial', 'explore', 'cotizador', 'triage', 'plan', 'doctor'];
+  const families = ['sandbox_*', 'reservation_*'];
+  const offenders = [];
+  for (const agent of granted) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    for (const family of families) {
+      if (perms[family] !== 'allow') {
+        offenders.push(`${agent}: ${family} is ${perms[family] ?? '(unset)'}, expected allow`);
+      }
+    }
+  }
+  for (const agent of denied) {
+    const perms = cfg.agent?.[agent]?.permission ?? {};
+    for (const family of families) {
+      if (perms[family] === 'allow' || perms[family] === 'ask') {
+        offenders.push(`${agent}: ${family} is ${perms[family]}, expected not granted`);
+      }
+    }
+  }
+  assert(offenders.length === 0, offenders.join('; '));
+  return `${granted.length} agents granted, ${denied.length} agents denied`;
+});
+
+check('the sandbox plugin is present with its entry point', () => {
+  const dir = join(repoRoot, 'plugins', 'sandbox-control');
+  assert(existsSync(dir), 'the sandbox control plugin directory is missing');
+  assert(existsSync(join(dir, 'index.js')), 'the sandbox control plugin has no entry point');
+  assert(existsSync(join(dir, 'GUIDE.md')), 'the sandbox control has no operator guide');
+  return 'plugin, entry point, and guide are present';
+});
+
+check('the Desktop fixture does not override protected configuration exclusions', () => {
+  const fixtureRoot = join(repoRoot, 'scripts/fixtures/docker-desktop');
+  const sandbox = JSON.parse(readFileSync(join(fixtureRoot, 'opencode-sandbox.json'), 'utf8'));
+  const dockerfile = readFileSync(join(fixtureRoot, 'Dockerfile'), 'utf8');
+  assert(isExcluded('opencode.json', ['opencode.json']).excluded, 'a project include re-enabled the protected OpenCode config');
+  assert(!isExcluded('runtime-fixture.json').excluded, 'the fixture config filename is unexpectedly protected');
+  assert(!sandbox.include?.includes('opencode.json'), 'the runtime fixture includes the protected filename');
+  assert(dockerfile.includes('COPY runtime-fixture.json /fixture/opencode.json'), 'the fixture does not install its sanitized config into the isolated image');
+  return 'the runtime fixture uses a safe source name and installs the config only inside the isolated image';
+});
+
+check('the sandbox argument set asserts the isolation boundary', () => {
+  // The boundary is constructed in one place so it can be asserted
+  // without a Docker engine. The check runs the module directly.
+  const modulePath = join(repoRoot, 'plugins', 'sandbox-control', 'docker-adapter.mjs');
+  const script = `
+    import { buildRunArguments, buildBuildArguments, assertNoForbiddenOptions, FORBIDDEN_OPTIONS }
+      from ${JSON.stringify(modulePath)};
+    const run = buildRunArguments({
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      workId: 'work-1',
+      containerName: 'sandbox-exec-1',
+      networkName: 'sandbox-net-exec-1',
+      ports: [{ container: 8080, host: '127.0.0.1', hostPort: 18080 }],
+    });
+    if (!run.ok) { console.error(run.reason); process.exit(1); }
+    const forbidden = assertNoForbiddenOptions(run.args);
+    if (!forbidden.ok) { console.error(forbidden.found.join(' ')); process.exit(1); }
+    for (const option of FORBIDDEN_OPTIONS) {
+      if (run.args.includes(option)) { console.error('present: ' + option); process.exit(1); }
+    }
+    if (!run.args.includes('--cap-drop')) { console.error('no --cap-drop'); process.exit(1); }
+    if (!run.args.includes('ALL')) { console.error('no capability drop'); process.exit(1); }
+    if (!run.args.includes('--security-opt')) { console.error('no --security-opt'); process.exit(1); }
+    if (!run.args.includes('no-new-privileges')) { console.error('no no-new-privileges'); process.exit(1); }
+    if (!run.args.includes('--cpus') || !run.args.includes('--memory')) { console.error('no limits'); process.exit(1); }
+    const external = buildRunArguments({
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      containerName: 'sandbox-exec-1',
+      networkName: 'sandbox-net-exec-1',
+      ports: [{ container: 8080, host: '0.0.0.0' }],
+    });
+    if (external.ok) { console.error('a non-loopback publication was accepted'); process.exit(1); }
+    const build = buildBuildArguments({
+      captureDir: ${JSON.stringify(join(repoRoot, 'plugins'))},
+      imageTag: 'sandbox:exec-1',
+      executionId: 'exec-1',
+      workId: 'work-1',
+    });
+    if (build.ok && !assertNoForbiddenOptions(build.args).ok) { console.error('the build carries a forbidden option'); process.exit(1); }
+    console.log('OK');
+  `;
+  const out = run(process.execPath, ['--input-type=module', '-e', script]);
+  assert(out.includes('OK'), `the sandbox argument set check failed: ${out.trim()}`);
+  return 'no forbidden option, no host network, loopback publications only, limits declared';
+});
+
+check('the sandbox module tests pass without Docker', () => {
+  const dir = join(repoRoot, 'plugins', 'sandbox-control', 'test');
+  for (const file of ['reservation.test.mjs', 'capture.test.mjs', 'lifecycle.test.mjs', 'boundaries.test.mjs']) {
+    assert(existsSync(join(dir, file)), `the sandbox test file ${file} is missing`);
+  }
+  const out = run(process.execPath, [join(dir, 'reservation.test.mjs')]);
+  assert(!/fail [1-9]/.test(out), `the reservation tests failed:\n${out}`);
+  const capture = run(process.execPath, [join(dir, 'capture.test.mjs')]);
+  assert(!/fail [1-9]/.test(capture), `the capture tests failed:\n${capture}`);
+  run(process.execPath, [join(dir, 'engine.test.mjs')]);
+  const lifecycle = run(process.execPath, [join(dir, 'lifecycle.test.mjs')]);
+  assert(!/fail [1-9]/.test(lifecycle), `the lifecycle tests failed:\n${lifecycle}`);
+  const boundaries = run(process.execPath, [join(dir, 'boundaries.test.mjs')]);
+  assert(!/fail [1-9]/.test(boundaries), `the boundary tests failed:\n${boundaries}`);
+  return 'the reservation, capture, lifecycle, and boundary tests pass on a host without Docker';
+});
+
+// ---------------------------------------------------------------------------
 // worktrees
 // ---------------------------------------------------------------------------
 
@@ -938,27 +1057,32 @@ check('the worktree plugin is present with its entry point', () => {
   return 'plugin and entry point are present';
 });
 
-check('the installer links the worktree plugin entry point', () => {
-  const installText = readFileSync(join(repoRoot, 'install.sh'), 'utf8');
-  assert(installText.includes('link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"'),
-    'install.sh must link the worktree entry point into the global plugins directory');
-  const temporaryRoot = mkdtempSync(join(tmpdir(), 'worktree-plugin-install-'));
-  try {
-    const pluginDir = join(temporaryRoot, 'plugins');
-    mkdirSync(pluginDir);
-    const installedEntry = join(pluginDir, 'worktree-control.js');
-    symlinkSync(join(repoRoot, 'plugins', 'worktree-control', 'index.js'), installedEntry);
-    const script = `
-      const plugin = await import(${JSON.stringify(pathToFileURL(installedEntry).href)});
-      if (typeof plugin.WorktreeControlPlugin !== 'function') throw new Error('plugin entry point did not load');
+check('shared inventory installs importable sandbox and worktree entrypoints exactly once', () => {
+  assert(RESOURCE_SOURCES['plugins/worktree-control.js'] === 'plugins/worktree-control/index.js', 'worktree inventory entry missing');
+  assert(RESOURCE_SOURCES['plugins/sandbox-control.js'] === 'plugins/sandbox-control/index.js', 'sandbox inventory entry missing');
+  const script = `
+    import fs from 'node:fs';
+    import os from 'node:os';
+    import path from 'node:path';
+    import { pathToFileURL } from 'node:url';
+    import { createPlan, applyPlan } from ${JSON.stringify(pathToFileURL(join(repoRoot, 'scripts/resource-manifest.mjs')).href)};
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'plugin-install-')));
+    try {
+      applyPlan(createPlan({repoRoot: ${JSON.stringify(repoRoot)}, configDir: path.join(dir, 'opencode')}));
+      const tools = new Set();
+      for (const [file, name] of [['sandbox-control.js', 'SandboxControlPlugin'], ['worktree-control.js', 'WorktreeControlPlugin']]) {
+        const module = await import(pathToFileURL(path.join(dir, 'opencode/plugins', file)).href);
+        const surface = await module[name]();
+        for (const name of Object.keys(surface.tool)) {
+          if (tools.has(name)) throw new Error('duplicate tool: ' + name);
+          tools.add(name);
+        }
+      }
       console.log('OK');
-    `;
-    const output = run(process.execPath, ['--input-type=module', '-e', script]);
-    assert(output.includes('OK'), `the installed plugin entry point did not load: ${output.trim()}`);
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
-  }
-  return 'the worktree plugin is installed at the global plugin entry point';
+    } finally { fs.rmSync(dir, {recursive:true, force:true}); }
+  `;
+  assert(run(process.execPath, ['--input-type=module', '-e', script]).includes('OK'), 'installed entrypoints failed import');
+  return 'temporary installation and imports verified; OpenCode runtime discovery remains separate';
 });
 
 check('the worktree inventory reconciles and the capacity announces no limit', () => {
@@ -1146,7 +1270,7 @@ if (LIVE) {
 // ---------------------------------------------------------------------------
 
 if (process.argv.includes('--list')) {
-  console.log('Groups: static, routing, skills, wrappers (add --live for runtime tests)');
+  console.log('Groups: static, routing, skills, sandbox, wrappers (add --live for runtime tests)');
   process.exit(0);
 }
 

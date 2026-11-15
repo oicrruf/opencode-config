@@ -18,10 +18,11 @@ The installer creates symbolic links under `~/.config/opencode` for the
 `herdr-tui-session.js` paths. The root `opencode.jsonc` is rendered from
 `config/opencode.template.jsonc` and the selected profile in
 `config/model-profiles.json`; the installer writes it directly rather than
-symlinking it. The previous root config is backed up to
-`opencode.jsonc.bak.<timestamp>` when the renderer overwrites it. The
-installer refuses to replace existing non-link paths. The Herdr-managed
-plugin is left untouched.
+symlinking it. A previous owned root config is backed up to
+`opencode.jsonc.bak.<uuid>` when it changes. Foreign resources and local
+modifications block installation before destinations are changed. Both
+worktree-control and sandbox-control entrypoints are installed from the shared
+inventory; externally managed Herdr resources are preserved.
 
 The `mmx-cli` skill is an optional, local-only checkout and is not included in
 this repository. On a fresh clone, installation succeeds with a warning that
@@ -56,6 +57,25 @@ change under `openspec/changes/<name>/`, declare the profile in the
 manifest, validate with `node scripts/validate-config.mjs --profile <name>`,
 then archive. The validator rejects profiles with missing consumers or
 phantom IDs before any installed configuration is touched.
+
+### Installed-state check and ownership
+
+```bash
+./install.sh --check                  # use the installed profile, write nothing
+./install.sh --check --profile work   # compare without activating work
+```
+
+Exit codes: **0** synchronized, **1** differences/conflicts, **2** invalid
+arguments/state or operational error. The installer records ownership in
+`.opencode-resource-manifest.json`; it never backs up and replaces an unowned
+or modified resource. Without a manifest, only exact legacy artifacts can be
+adopted. Modified obsolete artifacts remain visible as pending; the manifest
+protects whole links, not individual files inside linked trees.
+
+See [installed-resource ownership](docs/contracts/installation-resources.md)
+for conflict handling, migration, partial-failure journals, doctor behavior,
+activation and conservative rollback. Distribution/import checks do not prove
+that OpenCode loaded the plugins at runtime.
 
 ### Autonomous execution
 
@@ -189,7 +209,8 @@ install.sh: FAIL — gate acceptance-harness failed; rerun with OPENCODE_SKIP_AC
 ### Per-gate opt-outs
 
 Set any of these to `1` before running `install.sh` to bypass a single gate.
-Skipped gates do not cause a non-zero exit.
+Skipped gates do not cause a non-zero exit, but print `install.sh: PARTIAL`
+with counts and `verification incomplete` instead of the full-success line.
 
 | Env var                          | Effect                                                   |
 |----------------------------------|----------------------------------------------------------|
@@ -266,8 +287,96 @@ The installer links the plugin entry point into the global OpenCode
 plugins directory. The legacy `.opencode/worktree/` path remains ignored
 for compatibility only.
 
-## Diagnose and repair (`/doctor`)
+## Runtime verification sandbox
 
+Some changes can only be verified at runtime: a container that does not
+build, a service that does not answer, a page that does not render. The
+sandbox control verifies them from recorded evidence instead of from a
+claim.
+
+The sandbox takes an independent capture of the work under test and runs
+it inside a local Docker engine. The full operator guide is at
+`plugins/sandbox-control/GUIDE.md`.
+
+### Prerequisites
+
+- A local Docker engine on **Linux or WSL2**. The isolation boundary is
+  expressed with Docker's own flags, so there is no equivalent on macOS
+  or on Windows outside WSL2.
+- A project that declares its build in `.opencode/sandbox.json`.
+
+On a host that does not meet the requirements the control reports the
+block. It never installs Docker, never generates a Dockerfile, and never
+infers a build configuration.
+
+### The declared configuration
+
+```json
+{
+  "dockerfile": "Dockerfile",
+  "context": ".",
+  "stage": "test",
+  "ports": [{ "container": 8080, "host": "127.0.0.1", "hostPort": 18080 }],
+  "production": { "allowExternalEgress": false },
+  "testSecrets": [{ "name": "API_TOKEN", "value": "..." }]
+}
+```
+
+`dockerfile`, `context`, and `stage` are required. A declared path that
+leaves the project is refused: the build context is the boundary that
+keeps the host's content out of the image.
+
+### The isolation boundary
+
+Every run happens inside a boundary the control constructs itself: no
+Docker socket, no elevated privileges, no added capabilities, no host
+network, no host namespaces, no mount of the original source, a network
+created for the execution (internal by default), published ports bound
+to the loopback interface only, and declared CPU, memory, and process
+limits.
+
+### The result states
+
+`passed`, `failed`, `blocked`, and `not executed`. **Starting the
+environment does not approve the product**, and the sandbox never claims
+equivalence with production.
+
+### The dependencies
+
+The dependencies the project declares are checked before the quota is
+taken and before any resource is created. A dependency that does not
+answer **blocks the test**: the sandbox never provisions a service, so
+a database, a cache, or an API the test needs is the developer's to
+prepare. The block names the dependency that is missing.
+
+### Where the evidence lands
+
+The report is written to `.opencode/state/sandbox/reports/<execution>.json`
+in the project's state area, outside the environment and outside the
+capture. It is written **before** any resource is removed, so a container
+is never destroyed together with the report that describes it.
+
+### The quota
+
+One local application runs at a time per project, and the sandbox shares
+that quota with the manual application. A second session is refused
+before anything is launched, and the refusal names the work that holds
+it. The owner token is the only way to stop the application; it is
+stored on disk only as a salted verifier.
+
+Closing, cancelling, and recovering an execution all require the token
+that owns its reservation. An actor that knows only the execution
+identity cannot destroy an environment it does not own.
+
+### The limits
+
+The sandbox requires Linux or WSL2, does not provision dependencies
+(a missing service blocks the test), does not support Compose or a
+remote engine, does not return the changes a test made inside the
+container, and never modifies the host's branches, publishes code, or
+opens a pull request.
+
+## Diagnose and repair (`/doctor`)
 The global `doctor` subagent inspects the host, the configuration
 symlinks, the OpenSpec change state, and the declared MCPs, then prints
 a single report with one of four levels per finding: `ok`, `warn`,
@@ -281,19 +390,20 @@ pulling changes, or whenever a command complains about missing tools.
   found. Never installs anything and never relinks.
 - `/doctor --apply-safe` or `node scripts/doctor.mjs --apply-safe` —
   installs missing `lazygit`/`lazydocker` via the detected package
-  manager, recreates missing `~/.config/opencode/<entry>` symlinks
-  from the clone, and re-runs `scripts/validate-config.mjs`. Add
+  manager, recreates only absent resources with validated ownership
+  (including the regular rendered root), and re-runs `scripts/validate-config.mjs`. Add
   `--dry-run` to print the actions without executing them. The
-  repairs are idempotent.
+  repairs are idempotent. Changed or unowned files/links are preserved;
+  doctor does not bootstrap a missing manifest.
 
 ### What the report covers
 
 - **Tooling prerequisites** — `lazygit`, `lazydocker`, `openspec`,
   `codegraph`, `serena`. Missing entries are `fail`; the report
   prints the matching remediation line.
-- **Symlinks under `~/.config/opencode`** — every entry that
-  `install.sh` links is checked; missing or non-symlink paths are
-  `fail`.
+- **Installed resources** — the shared inventory checks the regular
+  root against its profile/digest, link origins, missing plugins, conflicts
+  and competing root files. It distinguishes distribution from runtime loading.
 - **OpenSpec change state** — any change with pending tasks is
   reported as `requires-approval` with the exact `/opsx-apply <name>`
   invocation. The doctor never applies an OpenSpec change on its
@@ -316,15 +426,17 @@ links are always created regardless of the warning.
 git -C ~/Projects/opencode-config pull --ff-only
 ```
 
-The links point to the clone, so no reinstall is needed after a successful
-pull. Restart OpenCode to use the update.
+The links point to the clone, so content updates reach linked resources.
+Run `./install.sh --check` after pulling; if the root or inventory changed,
+reinstall the intended profile after resolving any conflicts. Restart OpenCode
+to load the update.
 
 ### Switching profiles
 
 Re-running the installer with a different `--profile` re-renders the root
 config from the new profile and atomically replaces the installed
 `opencode.jsonc`. The previous root config is backed up to
-`opencode.jsonc.bak.<timestamp>`. The other symlinked resources (agents,
+`opencode.jsonc.bak.<uuid>`. The other symlinked resources (agents,
 commands, skills, plugins, TUI) are unchanged.
 
 ```bash

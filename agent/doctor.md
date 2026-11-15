@@ -32,8 +32,8 @@ node scripts/doctor.mjs --check-only
 The script emits a report with one line per finding, prefixed by one
 of `ok`, `warn`, `fail`, or `requires-approval`. Re-run with
 `--apply-safe` only after the operator has explicitly confirmed that
-they want the script to install missing binaries, recreate broken
-symlinks, and re-run the configuration validator.
+they want the script to install missing binaries, recreate absent resources with validated ownership (including the regular
+rendered root), and re-run the configuration validator.
 
 ## How to interpret the report
 
@@ -114,3 +114,10 @@ Return one OpenCode report containing:
 
 End with one of: `healthy`, `repaired`, `manual-actions-required`, or
 `blocked`. Do not send desktop or Herdr notifications.
+
+
+For installed resources, use the shared ownership report. Never recommend
+replacing a modified link, regular file, foreign directory, or Herdr-managed
+resource as a safe repair. A missing manifest requires the installation or
+reconciliation procedure; `--apply-safe` does not establish ownership. Keep
+plugin distribution/importability separate from observed runtime loading.

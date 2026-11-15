@@ -31,8 +31,7 @@ const templatePath = resolve(repoRoot, 'config/opencode.template.jsonc');
 const manifestPath = resolve(repoRoot, 'config/model-profiles.json');
 
 function fail(msg, code = 1) {
-  console.error(`render-config: ${msg}`);
-  process.exit(code);
+  throw new Error(`render-config: ${msg}`);
 }
 
 function parseArgs(argv) {
@@ -82,13 +81,9 @@ Options:
 `);
 }
 
-function main() {
-  const args = parseArgs(process.argv);
-  if (args.help) {
-    printHelp();
-    return;
-  }
-
+export function renderProfile(profileName = null, sourceRoot = repoRoot) {
+  const manifestPath = resolve(sourceRoot, 'config/model-profiles.json');
+  const templatePath = resolve(sourceRoot, 'config/opencode.template.jsonc');
   let manifest, template;
   try {
     manifest = readJsonc(manifestPath);
@@ -108,7 +103,7 @@ function main() {
     fail('manifest is missing a profiles object');
   }
 
-  const profileName = args.profile ?? manifest.defaultProfile;
+  profileName = profileName ?? manifest.defaultProfile;
   const profile = manifest.profiles[profileName];
   if (!profile) {
     fail(`unknown profile '${profileName}'; available: ${Object.keys(manifest.profiles).join(', ')}`);
@@ -180,6 +175,13 @@ function main() {
   }
 
   const rendered = JSON.stringify(template, null, 2) + '\n';
+  return rendered;
+}
+
+function main() {
+  const args = parseArgs(process.argv);
+  if (args.help) { printHelp(); return; }
+  const rendered = renderProfile(args.profile);
   if (args.output) {
     writeFileSync(args.output, rendered, 'utf8');
   } else {
@@ -187,4 +189,6 @@ function main() {
   }
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+}

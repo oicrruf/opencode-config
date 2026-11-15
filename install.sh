@@ -17,7 +17,7 @@ case "$repo_dir" in
       repo_dir="$(cygpath -w "$repo_dir")"
     else
       printf 'install.sh: cannot translate WSL path %s (need WSL or Git Bash)\n' "$repo_dir" >&2
-      exit 1
+      exit 2
     fi
     # Normalize backslashes to forward slashes. Win32 accepts either, but
     # bash's quoting of single backslashes inside `tr '...'` is brittle,
@@ -41,12 +41,14 @@ config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 #   --profile=<name>    same as above
 #   --help, -h          show usage and exit 0
 #
-# Anything else is rejected with exit 1.
+# Anything else is rejected with exit 2.
 
 PROFILE_OVERRIDE=""
+PROFILE_SEEN=0
+CHECK_MODE=0
 print_help() {
   cat <<'EOF'
-Usage: ./install.sh [--profile <name>]
+Usage: ./install.sh [--profile <name>] [--check]
 
 Profile selection:
   The model assignments are read from config/model-profiles.json and
@@ -60,7 +62,14 @@ Profile selection:
                      "personal"). Run ./install.sh --profile work to
                      switch to the demonstration "work" profile.
 
+  --check            inspect installed resources without writing any files;
+                     uses the recorded profile unless --profile is explicit.
   --help, -h         show this help.
+
+Check exit codes: 0 synchronized; 1 drift/conflicts; 2 invalid arguments/state
+or operational error. Installs refuse foreign or modified resources. Ownership
+is recorded in .opencode-resource-manifest.json; partial failures preserve
+.opencode-install-journal.json for reconciliation. No automatic takeover.
 
 Supported shells:
   The installer runs to completion on the four bash-based shells below
@@ -111,16 +120,25 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --profile)
+    --check)
+      if [ "$CHECK_MODE" = "1" ]; then exit 2; fi
+      CHECK_MODE=1
       shift
-      if [[ $# -eq 0 ]]; then
+      ;;
+    --profile)
+      if [ "$PROFILE_SEEN" = "1" ]; then exit 2; fi
+      PROFILE_SEEN=1
+      shift
+      if [[ $# -eq 0 ]] || [[ "$1" = -* ]] || [[ -z "$1" ]]; then
         printf 'install.sh: --profile requires a value\n' >&2
-        exit 1
+        exit 2
       fi
       PROFILE_OVERRIDE="$1"
       shift
       ;;
     --profile=*)
+      if [ "$PROFILE_SEEN" = "1" ] || [ -z "${1#--profile=}" ]; then exit 2; fi
+      PROFILE_SEEN=1
       PROFILE_OVERRIDE="${1#--profile=}"
       shift
       ;;
@@ -131,7 +149,7 @@ while [[ $# -gt 0 ]]; do
     *)
       printf 'install.sh: unknown argument: %s\n' "$1" >&2
       printf 'Run ./install.sh --help for usage.\n' >&2
-      exit 1
+      exit 2
       ;;
   esac
 done
@@ -147,7 +165,7 @@ done
 manifest_path="$repo_dir/config/model-profiles.json"
 if [ ! -f "$manifest_path" ]; then
   printf 'install.sh: manifest not found at %s\n' "$manifest_path" >&2
-  exit 1
+  exit 2
 fi
 
 # Resolve the node binary reliably: try `node` first (Linux/macOS), then
@@ -158,7 +176,25 @@ NODE_BIN="$(command -v node 2>/dev/null || true)"
 [ -z "$NODE_BIN" ] && NODE_BIN="$(command -v node.exe 2>/dev/null || true)"
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
   printf 'install.sh: node is required to render the selected profile; install Node.js >= 18.\n' >&2
-  exit 1
+  exit 2
+fi
+
+# Use the same inventory/planner for check and install. Pass the shell's
+# effective destination explicitly, including when Node is a Windows binary.
+node_config_dir="$config_dir"
+case "$NODE_BIN" in
+  *.exe|*.EXE)
+    if command -v wslpath >/dev/null 2>&1; then
+      node_config_dir="$(wslpath -w "$config_dir")"
+    elif command -v cygpath >/dev/null 2>&1; then
+      node_config_dir="$(cygpath -w "$config_dir")"
+    fi
+    ;;
+esac
+helper_args=(--config-dir "$node_config_dir")
+if [ "$PROFILE_SEEN" = "1" ]; then helper_args+=(--profile "$PROFILE_OVERRIDE"); fi
+if [ "$CHECK_MODE" = "1" ]; then
+  exec "$NODE_BIN" "$repo_dir/scripts/resource-manifest.mjs" "${helper_args[@]}" --check
 fi
 
 # ---------------------------------------------------------------------------
@@ -248,7 +284,7 @@ if(!m.defaultProfile||typeof m.defaultProfile!=='string'){process.exit(2);}
 process.stdout.write(m.defaultProfile);
 " "$manifest_path")" || {
   printf 'install.sh: manifest is missing a string defaultProfile field\n' >&2
-  exit 1
+  exit 2
 }
 
 SELECTED_PROFILE="${PROFILE_OVERRIDE:-$DEFAULT_PROFILE}"
@@ -268,7 +304,7 @@ const m=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));
 process.stdout.write(Object.keys(m.profiles||{}).join(', '));
 " "$manifest_path")"
   printf 'install.sh: unknown profile %q (available: %s)\n' "$SELECTED_PROFILE" "$AVAILABLE" >&2
-  exit 1
+  exit 2
 fi
 
 printf 'install.sh: profile=%s\n' "$SELECTED_PROFILE"
@@ -285,111 +321,22 @@ printf 'install.sh: profile=%s\n' "$SELECTED_PROFILE"
 if [ -f "$repo_dir/scripts/validate-config.mjs" ]; then
   if ! "$NODE_BIN" "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE"; then
     printf 'OpenCode configuration validation failed; refusing to link.\n' >&2
-    exit 1
+    exit 2
   fi
 fi
 
-mkdir -p "$config_dir"
+# Every destination, manifest and rendered profile is inspected before writes.
+# The helper revalidates the complete plan while holding its exclusive lock.
+"$NODE_BIN" "$repo_dir/scripts/resource-manifest.mjs" "${helper_args[@]}" --preflight
+"$NODE_BIN" "$repo_dir/scripts/resource-manifest.mjs" "${helper_args[@]}"
+printf 'OpenCode configuration linked from %s\n' "$repo_dir"
 
-# ---------------------------------------------------------------------------
-# Render the selected profile to a temporary file, validate it, then move it
-# into place atomically. The previous opencode.jsonc (file or symlink) is
-# backed up before the move so the operator can roll back by restoring the
-# backup.
-# ---------------------------------------------------------------------------
-
-renderer="$repo_dir/scripts/render-config.mjs"
-rendered_tmp="$(mktemp -t opencode-rendered-XXXXXX.jsonc)"
-trap 'rm -f "$rendered_tmp"' EXIT
-
-if ! "$NODE_BIN" "$renderer" --profile "$SELECTED_PROFILE" --output "$rendered_tmp"; then
-  printf 'install.sh: failed to render profile %q into %s\n' "$SELECTED_PROFILE" "$rendered_tmp" >&2
-  exit 1
-fi
-
-# Validate the rendered output structurally and against the catalog when the
-# catalog is present. A render failure or a phantom-id failure must NOT
-# replace a previously working installed root config.
-if ! "$NODE_BIN" "$repo_dir/scripts/validate-config.mjs" --profile "$SELECTED_PROFILE" --rendered-config "$rendered_tmp"; then
-  printf 'install.sh: rendered configuration failed validation; refusing to install.\n' >&2
-  exit 1
-fi
-
-installed_root="$config_dir/opencode.jsonc"
-if [ -e "$installed_root" ] || [ -L "$installed_root" ]; then
-  if [ -L "$installed_root" ]; then
-    rm "$installed_root"
-  else
-    backup="${installed_root}.bak.$(date +%Y%m%d%H%M%S)"
-    mv "$installed_root" "$backup"
-    printf 'install.sh: backed up previous root config to %s\n' "$backup" >&2
-  fi
-fi
-
-mv "$rendered_tmp" "$installed_root"
-rm -f "$rendered_tmp"
-trap - EXIT
-printf 'install.sh: installed rendered %s profile to %s\n' "$SELECTED_PROFILE" "$installed_root"
-
-# ---------------------------------------------------------------------------
-# Install JetBrainsMono Nerd Font (Linux/macOS only). The PowerShell installer
-# in scripts/install-nerd-fonts.ps1 is the supported path for Windows.
-#
-# This step is opt-out via OPENCODE_INSTALL_NERD_FONTS=0 and is non-fatal:
-# a failure here MUST NOT prevent the OpenCode configuration links from being
-# created. Exit codes: 0 = installed/skipped, 1 = failed (we just warn).
-# ---------------------------------------------------------------------------
-
+# Fonts are optional and run only after conflict-free installation, never check.
 if [ "${OPENCODE_INSTALL_NERD_FONTS:-1}" != "0" ] && [ -x "$repo_dir/scripts/install-nerd-fonts.sh" ]; then
   if ! "$repo_dir/scripts/install-nerd-fonts.sh"; then
-    printf 'Warning: JetBrainsMono Nerd Font install failed; OpenCode configuration links were still created.\n' >&2
-    printf 'See scripts/install-nerd-fonts.sh --help for manual steps.\n' >&2
+    printf 'Warning: JetBrainsMono Nerd Font install failed.\n' >&2
   fi
 fi
-
-# ---------------------------------------------------------------------------
-# Link the remaining resources (agents, commands, skills, plugins, TUI) from
-# the source repository. The root config is the rendered file written above;
-# these other paths are symlinked so updates to the repo show up on the next
-# OpenCode launch without re-running the installer.
-# ---------------------------------------------------------------------------
-
-link() {
-  local source="$1"
-  local target="$2"
-
-  if [ -e "$target" ] && [ ! -L "$target" ]; then
-    local backup="${target}.bak.$(date +%Y%m%d%H%M%S)"
-    mv "$target" "$backup"
-    printf 'Backed up existing path to %s\n' "$backup" >&2
-  fi
-
-  # Create the target's parent directory if it does not exist, so first-time
-  # installs on a fresh host complete without operator `mkdir` workarounds.
-  # `dirname --` protects against targets that begin with `-`.
-  local target_dir
-  target_dir="$(dirname -- "$target")"
-  if [ ! -d "$target_dir" ]; then
-    mkdir -p -- "$target_dir"
-  fi
-
-  ln -sfn "$source" "$target"
-}
-
-link "$repo_dir/agent" "$config_dir/agents"
-link "$repo_dir/commands" "$config_dir/commands"
-link "$repo_dir/skills" "$config_dir/skills"
-link "$repo_dir/tui.jsonc" "$config_dir/tui.jsonc"
-link "$repo_dir/herdr-tui-session.js" "$config_dir/herdr-tui-session.js"
-link "$repo_dir/quota-tui.tsx" "$config_dir/quota-tui.tsx"
-link "$repo_dir/plugins/herdr-agent-state.js" "$config_dir/plugins/herdr-agent-state.js"
-link "$repo_dir/plugins/worktree-control/index.js" "$config_dir/plugins/worktree-control.js"
-
-if [ -L "$config_dir/plugins/autonomy.js" ]; then
-  rm "$config_dir/plugins/autonomy.js"
-fi
-
-printf 'OpenCode configuration linked from %s\n' "$repo_dir"
 
 # ---------------------------------------------------------------------------
 # Post-install verification: when this block exits, every required gate has
@@ -431,19 +378,19 @@ gate_status=0
 if [ "${OPENCODE_SKIP_PROFILE_TESTS:-0}" = "1" ]; then
   run_gate "profile-tests" "true" 1 || gate_status=$?
 else
-  run_gate "profile-tests" "node '$repo_dir/scripts/test-model-profiles.mjs'" || gate_status=$?
+  run_gate "profile-tests" "'$NODE_BIN' '$repo_dir/scripts/test-model-profiles.mjs'" || gate_status=$?
 fi
 
 if [ "${OPENCODE_SKIP_JEV_CLIENT_TESTS:-0}" = "1" ]; then
   run_gate "jev-client-tests" "true" 1 || gate_status=$?
 else
-  run_gate "jev-client-tests" "node --test '$repo_dir/agent/lib/test/jev-client.test.mjs'" || gate_status=$?
+  run_gate "jev-client-tests" "'$NODE_BIN' --test '$repo_dir/agent/lib/test/jev-client.test.mjs'" || gate_status=$?
 fi
 
 if [ "${OPENCODE_SKIP_ACCEPTANCE:-0}" = "1" ]; then
   run_gate "acceptance-harness" "true" 1 || gate_status=$?
 else
-  run_gate "acceptance-harness" "node '$repo_dir/scripts/acceptance-harness.mjs'" || gate_status=$?
+  run_gate "acceptance-harness" "'$NODE_BIN' '$repo_dir/scripts/acceptance-harness.mjs'" || gate_status=$?
 fi
 
 if [ "${OPENCODE_SKIP_OPENSPEC_VALIDATE:-0}" = "1" ]; then
@@ -456,7 +403,10 @@ else
   run_gate "openspec-validate" "true" 1 || gate_status=$?
 fi
 
-if [ "$gate_status" -eq 0 ]; then
+if [ "$gate_status" -eq 0 ] && [ "$gate_skipped" -gt 0 ]; then
+  printf 'install.sh: PARTIAL — %d/%d gates passed (%d skipped); verification incomplete\n' \
+    "$gate_pass" "$gate_required" "$gate_skipped"
+elif [ "$gate_status" -eq 0 ]; then
   printf 'install.sh: OK — %d/%d gates passed (%d skipped)\n' \
     "$gate_pass" "$gate_required" "$gate_skipped"
 else
