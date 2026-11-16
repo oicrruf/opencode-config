@@ -88,13 +88,17 @@ function worktreeApiStub(state = {}) {
   return api;
 }
 
+function mcpConfigApiStub(entries = []) {
+  return { async get() { return { data: entries }; } };
+}
+
 test("the created worktree is outside the checkout and is recorded", async () => {
   await withRepo(async (root) => {
     const outside = mkdtempSync(join(tmpdir(), "worktree-outside-"));
     try {
       const api = worktreeApiStub({ base: outside, branch: "feature/widget" });
       const created = await createWorktree(
-        { workId: "widget", worktreeApi: api, cwd: root },
+        { workId: "widget", worktreeApi: api, cwd: root, mcpConfigApi: mcpConfigApiStub([]) },
         { actualWorktrees: [] },
       );
       assert.equal(created.ok, true);
@@ -117,11 +121,14 @@ test("a repeated request returns the same worktree and creates no second one", a
     const outside = mkdtempSync(join(tmpdir(), "worktree-outside-"));
     try {
       const api = worktreeApiStub({ base: outside });
-      const first = await createWorktree({ workId: "widget", worktreeApi: api, cwd: root }, {});
+      const first = await createWorktree(
+        { workId: "widget", worktreeApi: api, cwd: root, mcpConfigApi: mcpConfigApiStub([]) },
+        {},
+      );
       assert.equal(first.ok, true);
 
       const second = await createWorktree(
-        { workId: "widget", worktreeApi: api, cwd: root },
+        { workId: "widget", worktreeApi: api, cwd: root, mcpConfigApi: mcpConfigApiStub([]) },
         { actualWorktrees: [{ name: "widget", directory: first.worktree.directory, branch: "feature/widget" }] },
       );
       assert.equal(second.ok, true);

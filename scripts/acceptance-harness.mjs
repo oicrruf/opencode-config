@@ -1125,12 +1125,14 @@ check('the worktree inventory reconciles and the capacity announces no limit', (
 
 check('the worktree module tests pass', () => {
   const dir = join(repoRoot, 'plugins', 'worktree-control', 'test');
-  for (const file of ['control.test.mjs', 'retirement.test.mjs']) {
+  const files = readdirSync(dir).filter((file) => file.endsWith('.test.mjs')).sort();
+  assert(files.length > 0, 'no worktree-control test files were found');
+  for (const file of files) {
     assert(existsSync(join(dir, file)), `the worktree test file ${file} is missing`);
     const output = run(process.execPath, [join(dir, file)]);
     assert(!/fail [1-9]/.test(output), `the worktree test file ${file} failed:\n${output}`);
   }
-  return 'the control and retirement tests pass';
+  return `${files.length} worktree-control test files pass`;
 });
 
 // ---------------------------------------------------------------------------
