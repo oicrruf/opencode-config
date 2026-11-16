@@ -65,7 +65,13 @@ export const WorktreeControlPlugin = async () => {
           }
           const listing = await listWorktrees(api, project.cwd);
           return createWorktree(
-            { workId: args?.workId, branch: args?.branch ?? null, worktreeApi: api, cwd: project.cwd },
+            {
+              workId: args?.workId,
+              branch: args?.branch ?? null,
+              worktreeApi: api,
+              cwd: project.cwd,
+              mcpConfigApi: context?.client?.config ?? null,
+            },
             {
               actualWorktrees: listing.worktrees,
               listingVerified: listing.verified,

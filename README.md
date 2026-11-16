@@ -251,6 +251,38 @@ worktree's directory, branch, and state. The inventory reconciles records
 with actual worktrees: missing directories are reported as *missing* and
 unrecorded worktrees are reported rather than silently dropped.
 
+### MCP readiness and credential files
+
+Creation inspects OpenCode's effective MCP configuration from the actual
+worktree directory. Configuration presence is reported separately from
+provider connectivity; worktree creation does not start or authenticate
+providers, so connectivity remains `unknown`.
+
+Global credentials and file references that already resolve are reused. If
+an enabled MCP server declares an OpenCode `{file:path}` reference to a
+project-local file that is absent from the worktree, the control copies only
+that exact file when its worktree-relative path is explicitly listed in the
+machine-local `OPENCODE_WORKTREE_CREDENTIAL_FILES` JSON string array (for
+example, `'[".secrets/context7-key"]'`). Disabled servers are ignored. The
+control never copies `.env` files, whole directories, or unrelated files.
+Newly materialized files use mode `0600`; ownership metadata, not credential
+contents, is stored in `.opencode/state/worktrees/credentials/` so incomplete
+preparation can resume safely.
+
+Python 3 with descriptor-relative `dir_fd` and no-follow filesystem support
+is required only when a local file must be copied or an owned file must be
+verified. If those capabilities are unavailable, preparation or cleanup fails closed; the
+control does not install dependencies or fall back to pathname-based
+copying. During explicit retirement, owned credential files are recognized
+by the ignored-file check. Because OpenCode's worktree-removal API cannot
+atomically verify credential identity at deletion time, the control refuses
+retirement while any control-owned credential file remains in the worktree,
+including a file whose identity changed. Move or delete those credential
+files explicitly, then retry retirement. The control never asks the API to
+delete a managed credential. After all owned paths are safely verified absent,
+a successful worktree removal clears the stale ownership manifest. Unowned
+files remain subject to the standard retirement checks.
+
 ### Capacity
 
 `worktree_capacity` reports measured available space and the number of

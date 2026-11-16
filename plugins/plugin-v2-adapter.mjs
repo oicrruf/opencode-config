@@ -64,7 +64,7 @@ export async function registerV2Tools(ctx, pluginId, toolFactory, { worktree = f
             directory: session.directory,
             projectID: session.projectID,
             worktree: worktreeApi,
-            client: { worktree: worktreeApi },
+            client: { worktree: worktreeApi, config: ctx?.client?.config ?? null },
             sessionID: session.sessionID,
           });
           return { content: typeof result === "string" ? result : JSON.stringify(result) };

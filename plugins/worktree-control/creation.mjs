@@ -16,6 +16,7 @@ import { recordWorktree, findByWorkId, reconcileInventory } from "./inventory.mj
 import { resolveProjectRoot, resolveProjectId, resolveWorktreeRoot } from "./paths.mjs";
 import { evaluateCapacityForCreation, reportCapacity } from "./capacity.mjs";
 import { acquireLock, releaseLock } from "./lock.mjs";
+import { inspectMcpConfiguration } from "./mcp-preparation.mjs";
 
 /**
  * The name a worktree carries.
@@ -50,7 +51,7 @@ function isInside(parent, candidate) {
  * worktree instead of creating a second one, and it never resets it.
  */
 export async function createWorktree(input, deps = {}) {
-  const { workId, worktreeApi, cwd = process.cwd(), branch = null } = input ?? {};
+  const { workId, worktreeApi, cwd = process.cwd(), branch = null, mcpConfigApi = null } = input ?? {};
 
   if (!workId) return { ok: false, reason: "the creation needs a work identifier" };
   if (!worktreeApi || typeof worktreeApi.create !== "function") {
@@ -87,16 +88,46 @@ export async function createWorktree(input, deps = {}) {
     const reconciled = reconcileInventory(project.root, actual);
     const live = reconciled.present.find((entry) => entry.directory === existing.entry.directory);
     if (live) {
-      return {
-        ok: true,
-        created: false,
-        reused: true,
-        worktree: {
-          workId,
-          directory: live.directory,
-          branch: live.branch ?? existing.entry.branch ?? null,
-        },
-      };
+      const locked = acquireLock(project.root, { scope: "prepare" });
+      if (!locked.ok) {
+        return {
+          ok: false,
+          blocked: true,
+          reason: locked.reason,
+          heldBy: locked.heldBy ?? null,
+        };
+      }
+      try {
+        const readiness = await inspectMcpConfiguration(live.directory, mcpConfigApi, { projectRoot: project.root });
+        if (!readiness.ok) {
+          return {
+            ok: false,
+            blocked: true,
+            reason: readiness.reason,
+            readiness,
+            created: false,
+            reused: true,
+            worktree: {
+              workId,
+              directory: live.directory,
+              branch: live.branch ?? existing.entry.branch ?? null,
+            },
+          };
+        }
+        return {
+          ok: true,
+          created: false,
+          reused: true,
+          worktree: {
+            workId,
+            directory: live.directory,
+            branch: live.branch ?? existing.entry.branch ?? null,
+          },
+          readiness,
+        };
+      } finally {
+        releaseLock(project.root, { ownerPid: locked.lock.ownerPid });
+      }
     }
   }
 
@@ -165,11 +196,29 @@ export async function createWorktree(input, deps = {}) {
       return { ok: false, reason: recorded.reason, directory };
     }
 
+    // The created worktree is already recorded before inspecting it. If
+    // inspection fails, leave it intact and resumable rather than orphaning
+    // a directory that OpenCode created.
+    const readiness = await inspectMcpConfiguration(directory, mcpConfigApi, { projectRoot: project.root });
+    if (!readiness.ok) {
+      return {
+        ok: false,
+        blocked: true,
+        reason: readiness.reason,
+        readiness,
+        created: true,
+        reused: false,
+        worktree: { workId, directory, branch: createdBranch },
+        capacity,
+      };
+    }
+
     return {
       ok: true,
       created: true,
       reused: false,
       worktree: { workId, directory, branch: createdBranch },
+      readiness,
       capacity,
     };
   } finally {

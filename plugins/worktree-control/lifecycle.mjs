@@ -11,11 +11,15 @@
 
 import { resolveProjectRoot, resolveProjectId, resolveWorktreeRoot } from "./paths.mjs";
 import { relative, resolve, isAbsolute } from "node:path";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { acquireLock, releaseLock } from "./lock.mjs";
 import { forgetWorktree, reconcileInventory } from "./inventory.mjs";
 import { runBlockingChecks } from "./retirement-checks.mjs";
 import { preserveEvidence } from "./evidence.mjs";
+import {
+  ownedMcpCredentialFiles,
+  clearOwnedMcpCredentialMetadata,
+} from "./mcp-preparation.mjs";
 import {
   validateRetirementRequest,
   removeWorktree,
@@ -110,6 +114,29 @@ export async function retireWorktree(input, deps = {}) {
       };
     }
 
+    const ownershipKey = realpathSync(worktree);
+    const credentialOwnership = ownedMcpCredentialFiles(project.root, ownershipKey);
+    if (!credentialOwnership.ok) {
+      return {
+        ok: false,
+        reason: credentialOwnership.reason,
+        blocked: true,
+        credentialCleanup: { ok: false, removed: [] },
+        removed: false,
+      };
+    }
+    if (credentialOwnership.files.length > 0) {
+      return {
+        ok: false,
+        reason: "worktree retirement is blocked while managed MCP credential files remain; move or delete them explicitly, then retry",
+        blocked: true,
+        credentialCleanup: { ok: false, removed: [], pending: true },
+        credentialFiles: credentialOwnership.files.map((file) => file.path),
+        removed: false,
+      };
+    }
+    const ignoredFiles = [...recognizedIgnored, ...credentialOwnership.files.map((file) => file.path)];
+
     // The checks run against the directory, not against the inventory:
     // a worktree that was created outside the control is retired by
     // the same rules.
@@ -117,7 +144,7 @@ export async function retireWorktree(input, deps = {}) {
       directory: worktree,
       branch,
       expectedRoot: managedRoot,
-      recognizedIgnored,
+      recognizedIgnored: ignoredFiles,
       deps,
     });
 
@@ -160,7 +187,7 @@ export async function retireWorktree(input, deps = {}) {
       directory: worktree,
       branch,
       expectedRoot: managedRoot,
-      recognizedIgnored,
+      recognizedIgnored: ignoredFiles,
       deps,
     });
     const identityRevalidation = verifyIdentity(validated.request, project.root, deps);
@@ -192,6 +219,23 @@ export async function retireWorktree(input, deps = {}) {
       };
     }
 
+    // Revalidate immediately before the API call. Retirement is allowed only
+    // after every control-owned credential path is already absent; the API is
+    // never asked to delete a managed credential file.
+    const ownershipRevalidation = ownedMcpCredentialFiles(project.root, ownershipKey);
+    if (!ownershipRevalidation.ok || ownershipRevalidation.files.length > 0) {
+      return {
+        ok: false,
+        reason: "worktree retirement is blocked because an owned MCP credential path is present or unsafe",
+        checks,
+        revalidated: true,
+        evidencePreserved: true,
+        evidence: preservation.target,
+        credentialCleanup: { ok: false, removed: [], pending: true },
+        removed: false,
+      };
+    }
+
     const removal = await removeWorktree(worktree, worktreeApi, cwd);
     if (!removal.ok) {
       return {
@@ -200,9 +244,35 @@ export async function retireWorktree(input, deps = {}) {
         checks,
         evidencePreserved: true,
         evidence: preservation.target,
+        credentialCleanup: {
+          ok: true,
+          removed: [],
+          pending: credentialOwnership.absent.length > 0,
+          reason: "worktree removal failed; no managed credential file was removed",
+        },
         removed: false,
       };
     }
+
+    if (existsSync(worktree)) {
+      return {
+        ok: false,
+        reason: "the worktree API reported success but the worktree directory remains",
+        checks,
+        evidencePreserved: true,
+        evidence: preservation.target,
+        credentialCleanup: { ok: false, removed: [], pending: credentialOwnership.absent.length > 0 },
+        removed: false,
+      };
+    }
+
+    const ownershipMetadata = clearOwnedMcpCredentialMetadata(project.root, ownershipKey);
+    const credentialCleanup = {
+      ok: ownershipMetadata.ok,
+      removed: [],
+      pending: !ownershipMetadata.ok,
+      ...(ownershipMetadata.ok ? {} : { reason: ownershipMetadata.reason }),
+    };
 
     forgetWorktree(project.root, worktree);
 
@@ -227,6 +297,7 @@ export async function retireWorktree(input, deps = {}) {
       evidence: preservation.target,
       evidenceFiles: preservation.copied,
       evidenceSkipped: preservation.skipped,
+      credentialCleanup,
       branch: {
         removed: branchResult.ok === true,
         pending: branchResult.pending === true,
@@ -314,11 +385,26 @@ export async function listRetirementCandidates(input, deps = {}) {
   const candidates = [];
 
   for (const entry of entries) {
+    const credentialOwnership = ownedMcpCredentialFiles(project.root, entry.directory);
+    if (!credentialOwnership.ok) {
+      candidates.push({
+        workId: entry.workId ?? null,
+        directory: entry.directory,
+        branch: entry.branch ?? null,
+        createdAt: entry.createdAt ?? null,
+        age: ageOf(entry.createdAt),
+        candidate: false,
+        reason: credentialOwnership.reason,
+        wouldBlock: ["credentialOwnership"],
+        checks: null,
+      });
+      continue;
+    }
     const checks = runBlockingChecks({
       directory: entry.directory,
       branch: entry.branch,
       expectedRoot,
-      recognizedIgnored,
+      recognizedIgnored: [...recognizedIgnored, ...credentialOwnership.files.map((file) => file.path)],
       deps,
     });
     candidates.push({

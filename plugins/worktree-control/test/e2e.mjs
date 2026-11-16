@@ -93,7 +93,13 @@ const report = (label, value) => {
 
 // 1. The creation records the worktree in the inventory.
 const created = await createWorktree(
-  { workId: "e2e-work", branch: "feature/e2e", worktreeApi: api, cwd: root },
+  {
+    workId: "e2e-work",
+    branch: "feature/e2e",
+    worktreeApi: api,
+    cwd: root,
+    mcpConfigApi: { async get() { return { data: [] }; } },
+  },
   { actualWorktrees: (await api.list()).data },
 );
 report("creation", {
