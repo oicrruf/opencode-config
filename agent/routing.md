@@ -41,23 +41,23 @@ See [OpenCode provider setup](https://opencode.ai/docs/providers) and
 
 The model assignments below match both profiles; only the root default varies.
 
-| Agent | Default model | `steps` | Browser MCP | CodeGraph | Serena | Context7 |
-|---|---|---:|---|---|---|---|
-| `plan` | `openai/gpt-5.6-luna` | omitted | deny | allow | deny | allow |
-| `build` | `openai/gpt-6.1-sol` | omitted | deny | allow | deny | allow |
-| `general` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow |
-| `explore` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny |
-| `architect` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow |
-| `orchestrator` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow |
-| `refactor` | `openai/gpt-5.6-terra` | 100 | deny | allow | allow | allow |
-| `frontend` | `openai/gpt-6.1-sol` | 80 | allow | allow | deny | deny |
-| `backend` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow |
-| `qa` | `openai/gpt-6.1-sol` | 60 | allow | allow | deny | deny |
-| `adversarial` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | allow |
-| `cotizador` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | deny |
-| `p5t-installer` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow |
-| `doctor` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow |
-| `triage` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny |
+| Agent | Default model | `steps` | Browser MCP | CodeGraph | Serena | Context7 | Composio |
+|---|---|---:|---|---|---|---|---|
+| `plan` | `openai/gpt-5.6-luna` | omitted | deny | allow | deny | allow | ask |
+| `build` | `openai/gpt-6.1-sol` | omitted | deny | allow | deny | allow | ask |
+| `general` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow | ask |
+| `explore` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny | ask |
+| `architect` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow | ask |
+| `orchestrator` | `openai/gpt-5.6-terra` | 100 | deny | allow | deny | allow | ask |
+| `refactor` | `openai/gpt-5.6-terra` | 100 | deny | allow | allow | allow | ask |
+| `frontend` | `openai/gpt-6.1-sol` | 80 | allow | allow | deny | deny | ask |
+| `backend` | `openai/gpt-6.1-sol` | 80 | deny | allow | deny | allow | ask |
+| `qa` | `openai/gpt-6.1-sol` | 60 | allow | allow | deny | deny | ask |
+| `adversarial` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | allow | ask |
+| `cotizador` | `openai/gpt-5.6-terra` | 100 | allow | allow | deny | deny | ask |
+| `p5t-installer` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow | ask |
+| `doctor` | `openai/gpt-5.6-luna` | 100 | deny | allow | deny | allow | ask |
+| `triage` | `openai/gpt-5.6-luna` | 25 | deny | allow | deny | deny | deny |
 
 `commands/*.md` keep their `model:` frontmatter because the installer symlinks
 the whole directory. The manifest's `commands` section is informational; the

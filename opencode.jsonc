@@ -46,6 +46,7 @@
         },
         "task": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-5.6-luna"
@@ -55,7 +56,8 @@
       "permission": {
         "edit": "deny",
         "bash": "deny",
-        "codegraph_*": "allow"
+        "codegraph_*": "allow",
+        "composio_*": "ask"
       },
       "model": "openai/gpt-5.6-luna"
     },
@@ -66,6 +68,7 @@
         "bash": "deny",
         "task": "deny",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow",
         "playwright_*": "allow"
       },
@@ -77,6 +80,7 @@
         "bash": "ask",
         "task": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
         "reservation_*": "allow",
@@ -89,6 +93,7 @@
       "permission": {
         "edit": "ask",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-6.1-sol"
@@ -99,6 +104,7 @@
         "edit": "allow",
         "bash": "ask",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "playwright_*": "allow",
         "sandbox_*": "allow",
         "reservation_*": "allow"
@@ -111,6 +117,7 @@
         "edit": "allow",
         "bash": "ask",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
         "reservation_*": "allow"
@@ -123,6 +130,7 @@
         "edit": "deny",
         "bash": "deny",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "playwright_*": "allow"
       },
       "model": "openai/gpt-6.1-sol"
@@ -134,6 +142,7 @@
         "bash": "ask",
         "webfetch": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "playwright_*": "allow"
       },
       "model": "openai/gpt-5.6-terra"
@@ -151,6 +160,7 @@
         "task": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow",
         "serena_*": "allow",
         "worktree_*": "allow"
@@ -169,6 +179,7 @@
         "task": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-5.6-terra"
@@ -182,6 +193,7 @@
         "external_directory": "allow",
         "question": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-5.6-terra"
@@ -193,6 +205,7 @@
         "bash": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-5.6-luna"
@@ -204,6 +217,7 @@
         "bash": "allow",
         "external_directory": "allow",
         "codegraph_*": "allow",
+        "composio_*": "ask",
         "context7_*": "allow"
       },
       "model": "openai/gpt-5.6-luna"
@@ -263,6 +277,11 @@
         "--browser",
         "chromium"
       ],
+      "enabled": true
+    },
+    "composio": {
+      "type": "remote",
+      "url": "https://connect.composio.dev/mcp",
       "enabled": true
     }
   },

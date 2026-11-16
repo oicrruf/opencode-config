@@ -11,6 +11,7 @@ permission:
   bash: ask
   external_directory: ask
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
   webfetch: ask
   websearch: ask

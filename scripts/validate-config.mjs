@@ -343,6 +343,8 @@ function runStructuralChecks() {
       }
     }
 
+    validateComposioSurface(cfgPath, cfg);
+
     // Check 4: every MCP server in opencode.jsonc is referenced by at least one
     // agent permission or has `enabled: false`.
     if (cfg.mcp) {
@@ -359,8 +361,50 @@ function runStructuralChecks() {
     }
   }
 
+  const templatePath = join(repoRoot, 'config', 'opencode.template.jsonc');
+  if (existsSync(templatePath)) {
+    try {
+      validateComposioSurface(templatePath, readJsonc(templatePath));
+    } catch (e) {
+      fail(templatePath, `cannot parse template JSONC: ${e.message}`);
+    }
+  }
+
   runSandboxSurfaceChecks();
   runWorktreeSurfaceChecks();
+}
+
+function validateComposioSurface(file, cfg) {
+  const server = cfg.mcp?.composio;
+  if (!server || server.enabled === false || server.type !== 'remote' ||
+      server.url !== 'https://connect.composio.dev/mcp') {
+    fail(file, `required MCP 'composio' must be enabled, remote, and use https://connect.composio.dev/mcp`);
+  }
+
+  for (const [name, agent] of Object.entries(cfg.agent ?? {})) {
+    const permission = agent?.permission ?? {};
+    const expected = name === 'triage' ? undefined : 'ask';
+    if (permission['composio_*'] !== expected) {
+      fail(file, `agent.${name} composio_* permission must be ${expected ?? 'absent'}`);
+    }
+  }
+
+  if (file.endsWith('/config/opencode.template.jsonc') || file.endsWith('/opencode.jsonc')) {
+    for (const agentFile of listAgentFiles()) {
+      const name = agentFile.split(/[\\/]/).at(-1).replace(/\.md$/, '');
+      const frontmatter = readFrontmatter(agentFile);
+      if (!frontmatter?.permission) continue;
+      const expected = name === 'triage' ? undefined : 'ask';
+      if (frontmatter.permission['composio_*'] !== expected) {
+        fail(agentFile, `composio_* permission must be ${expected ?? 'absent'}`);
+      }
+    }
+  }
+
+  const serialized = JSON.stringify(cfg);
+  if (/"(?:access_token|refresh_token|client_secret)"\s*:/i.test(serialized)) {
+    fail(file, 'managed configuration must not contain Composio OAuth credentials');
+  }
 }
 
 // The sandbox control is granted to the agents that verify a change.
@@ -746,6 +790,8 @@ function runProfileChecks() {
         fail(renderedPath, `cannot parse rendered JSONC: ${e.message}`);
         return { manifest, profile, profileIds };
       }
+
+      validateComposioSurface(renderedPath, rendered);
 
       if (!rendered.model || typeof rendered.model !== 'string') {
         fail(renderedPath, `rendered config is missing root.model`);

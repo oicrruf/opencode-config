@@ -133,6 +133,18 @@ and `openai/gpt-5.6-luna` for lightweight work. The `work` demonstration profile
 uses `openai/gpt-5.6-terra` as its root default; agent assignments stay the
 same. See `agent/routing.md` for the role matrix.
 
+### Required Composio MCP
+
+Composio is a required part of the managed OpenCode configuration, not an
+optional profile add-on. Both `personal` and `work` MUST include the enabled
+remote MCP named `composio` at `https://connect.composio.dev/mcp`; validation
+MUST fail if it is missing, disabled, or points elsewhere. Every configured
+agent except the MCP-denied `triage` may invoke `composio_*` tools with
+interactive approval (`ask`). OAuth credentials are stored by OpenCode and
+MUST NOT be added to repository configuration. After installation, confirm
+the connection with `opencode mcp list`; if authentication is needed, run
+`opencode mcp auth composio`.
+
 OpenCode supports ChatGPT Plus/Pro OAuth for OpenAI models. Usage counts
 against the ChatGPT plan allowance. OpenAI API billing is separate; this
 repository does not add or store API keys. See the

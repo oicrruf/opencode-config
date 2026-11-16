@@ -506,7 +506,8 @@ improve, redesign, optimize, audit, or evaluate a site — never selects
 - `permission` is deny-by-default at the baseline; each agent carries
   its own `permission` block with the minimum tool surface it needs
   (MCP tools gated by `codegraph_*`, `playwright_*`, `context7_*`,
-  `serena_*`).
+  `serena_*`, and `composio_*`). Composio tools require interactive
+  approval; Triage has no Composio access.
 
 Per-agent overrides follow the budget matrix in `agent/routing.md`. An
 agent with `targeted` / `full` modes declares the `steps` budget of its
@@ -520,6 +521,11 @@ The MCP set still loads at startup; the per-agent `permission` block
 hides the corresponding tool families from agents that should not see
 them. Use `node scripts/validate-config.mjs` to verify the policy
 before committing.
+
+Composio is managed as the remote MCP at `https://connect.composio.dev/mcp`.
+After installation, check `opencode mcp list`; if it reports
+`needs authentication`, run `opencode mcp auth composio` and complete the
+OAuth flow. OpenCode stores OAuth credentials outside this repository.
 
 ## Triage decision agent
 

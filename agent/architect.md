@@ -15,6 +15,7 @@ permission:
     "git *": allow
   external_directory: allow
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
 ---
 

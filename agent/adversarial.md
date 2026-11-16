@@ -6,6 +6,7 @@ permission:
   edit: deny
   bash: deny
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
   playwright_*: allow
 ---

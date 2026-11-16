@@ -18,6 +18,7 @@ permission:
   external_directory: allow
   serena_*: allow
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
 ---
 

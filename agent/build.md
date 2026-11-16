@@ -6,6 +6,7 @@ permission:
   bash: ask
   task: allow
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
 ---
 

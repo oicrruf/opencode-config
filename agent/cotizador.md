@@ -7,6 +7,7 @@ permission:
   bash: ask
   webfetch: allow
   codegraph_*: allow
+  composio_*: ask
   playwright_*: allow
 ---
 

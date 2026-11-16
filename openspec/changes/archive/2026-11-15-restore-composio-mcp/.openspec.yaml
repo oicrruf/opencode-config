@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-15
+goal: Restore Composio for the OpenCode workflow and prevent subsequent installs
+  from removing it.

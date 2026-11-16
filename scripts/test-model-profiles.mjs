@@ -117,6 +117,22 @@ check('explicit --profile work renders distinct assignments', () => {
     if (rW.status !== 0) throw new Error(`render work failed: ${rW.stderr}`);
     const personal = readJsonc(outPersonal);
     const work = readJsonc(outWork);
+    for (const [profileName, rendered] of [['personal', personal], ['work', work]]) {
+      const composio = rendered.mcp?.composio;
+      if (!composio || composio.enabled === false || composio.type !== 'remote' ||
+          composio.url !== 'https://connect.composio.dev/mcp') {
+        throw new Error(`${profileName} profile is missing the required Composio MCP`);
+      }
+      for (const [agentName, agent] of Object.entries(rendered.agent)) {
+        const expected = agentName === 'triage' ? undefined : 'ask';
+        if (agent.permission?.['composio_*'] !== expected) {
+          throw new Error(`${profileName}.${agentName} composio_* permission must be ${expected ?? 'absent'}`);
+        }
+      }
+      if (/(?:access_token|refresh_token|client_secret)/i.test(JSON.stringify(rendered))) {
+        throw new Error(`${profileName} profile unexpectedly contains OAuth credential fields`);
+      }
+    }
     // Per-agent slots are intentionally identical across profiles; the
     // demonstration profile changes only the root default.
     if (personal.model === work.model) {
@@ -133,6 +149,34 @@ check('explicit --profile work renders distinct assignments', () => {
       throw new Error(`profile roots must be OpenAI Sol/Terra, got ${personal.model}/${work.model}`);
     }
     return `personal root=${personal.model}, work root=${work.model}; 5 execution agents identical`;
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+check('validator rejects missing, disabled, or wrong-endpoint Composio MCP', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'profile-composio-'));
+  try {
+    const baseline = join(tmp, 'personal.jsonc');
+    const rendered = renderProfile('personal', baseline);
+    if (rendered.status !== 0) throw new Error(`render personal failed: ${rendered.stderr}`);
+    const config = readJsonc(baseline);
+    const invalidCases = [
+      ['missing', (cfg) => { delete cfg.mcp.composio; }],
+      ['disabled', (cfg) => { cfg.mcp.composio.enabled = false; }],
+      ['wrong endpoint', (cfg) => { cfg.mcp.composio.url = 'https://example.com/mcp'; }],
+    ];
+    for (const [label, mutate] of invalidCases) {
+      const candidate = structuredClone(config);
+      mutate(candidate);
+      const path = join(tmp, `${label.replaceAll(' ', '-')}.jsonc`);
+      writeFileSync(path, JSON.stringify(candidate, null, 2), 'utf8');
+      const result = nodeExec(['scripts/validate-config.mjs', '--profile', 'personal', '--rendered-config', path]);
+      if (result.status === 0 || !result.stderr.includes("required MCP 'composio'")) {
+        throw new Error(`${label} Composio configuration was not rejected: ${result.stderr}`);
+      }
+    }
+    return 'missing, disabled, and wrong-endpoint server configurations are rejected';
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ permission:
   external_directory: allow
   question: allow
   codegraph_*: allow
+  composio_*: ask
   context7_*: allow
 ---
 
