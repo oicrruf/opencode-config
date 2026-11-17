@@ -1,0 +1,333 @@
+{
+  "scope": "AT-200",
+  "observations": [
+    {
+      "operation": "build",
+      "executionId": "at-200-runtime-210af9a2",
+      "previousExecutionId": null,
+      "previousReportPath": null,
+      "configuration": {
+        "path": "opencode-sandbox.json",
+        "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+        "parameters": {
+          "dockerfile": "Dockerfile",
+          "context": ".",
+          "stage": "probe",
+          "allowExternalEgress": false,
+          "dependencyCount": 0,
+          "testSecretCount": 1
+        },
+        "captured": false
+      },
+      "secondStartRefused": true,
+      "isolation": {
+        "noMounts": true,
+        "noPrivileges": true,
+        "internalNetwork": true,
+        "noHostNetwork": true,
+        "noAddedCapabilities": true,
+        "noDevices": true,
+        "noHostPidOrIpc": true,
+        "noPublishedPorts": true,
+        "capDropAll": true,
+        "noNewPrivileges": true,
+        "memory": 536870912,
+        "nanoCpus": 1000000000,
+        "pids": 64
+      },
+      "previousReportPreserved": true,
+      "previousReport": null
+    },
+    {
+      "operation": "rebuild",
+      "executionId": "at-200-runtime-dc257fc4",
+      "previousExecutionId": "at-200-runtime-210af9a2",
+      "previousReportPath": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe/.opencode/state/sandbox/reports/at-200-runtime-210af9a2.json",
+      "configuration": {
+        "path": "opencode-sandbox.json",
+        "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+        "parameters": {
+          "dockerfile": "Dockerfile",
+          "context": ".",
+          "stage": "probe",
+          "allowExternalEgress": false,
+          "dependencyCount": 0,
+          "testSecretCount": 1
+        },
+        "captured": false
+      },
+      "secondStartRefused": true,
+      "isolation": {
+        "noMounts": true,
+        "noPrivileges": true,
+        "internalNetwork": true,
+        "noHostNetwork": true,
+        "noAddedCapabilities": true,
+        "noDevices": true,
+        "noHostPidOrIpc": true,
+        "noPublishedPorts": true,
+        "capDropAll": true,
+        "noNewPrivileges": true,
+        "memory": 536870912,
+        "nanoCpus": 1000000000,
+        "pids": 64
+      },
+      "previousReportPreserved": true,
+      "previousReport": {
+        "version": 1,
+        "result": "not executed",
+        "executionId": "at-200-runtime-210af9a2",
+        "workId": "AT-200-runtime",
+        "workName": "AT-200-runtime",
+        "source": {
+          "checkout": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe"
+        },
+        "configuration": {
+          "path": "opencode-sandbox.json",
+          "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+          "parameters": {
+            "dockerfile": "Dockerfile",
+            "context": ".",
+            "stage": "probe",
+            "allowExternalEgress": false,
+            "dependencyCount": 0,
+            "testSecretCount": 1
+          },
+          "captured": false
+        },
+        "startedAt": "2026-11-16T14:45:05.669Z",
+        "concludedAt": "2026-11-16T14:45:07.391Z",
+        "capture": {
+          "branch": null,
+          "head": null,
+          "files": 38,
+          "fingerprint": "5df7fdec61f4a53dc4c216f8dac917cb5fd432d52646363114e354827826b56d"
+        },
+        "engine": {
+          "schemaVersion": 1,
+          "endpoint": "unix:///Users/oicrruf/.docker/run/docker.sock",
+          "platform": "darwin",
+          "id": "38272e5f-761f-4a7b-be8c-e2e128eb7e73",
+          "osType": "linux",
+          "operatingSystem": "Docker Desktop",
+          "version": "29.7.2",
+          "architecture": "aarch64"
+        },
+        "image": "sandbox/at-200-runtime:at-200-runtime-210af9a2",
+        "container": "sandbox-at-200-runtime-210af9a2",
+        "network": "sandbox-net-at-200-runtime-210af9a2",
+        "steps": [
+          "explicit sandbox replacement or transition recovery"
+        ],
+        "differencesFromProduction": [],
+        "secretNames": [
+          "OPENCODE_PASSWORD"
+        ],
+        "approved": false,
+        "note": "starting the environment does not approve the product"
+      }
+    },
+    {
+      "operation": "transfer",
+      "executionId": "at-200-runtime-24900ba5",
+      "previousExecutionId": "at-200-runtime-dc257fc4",
+      "previousReportPath": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe/.opencode/state/sandbox/reports/at-200-runtime-dc257fc4.json",
+      "configuration": {
+        "path": "opencode-sandbox.json",
+        "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+        "parameters": {
+          "dockerfile": "Dockerfile",
+          "context": ".",
+          "stage": "probe",
+          "allowExternalEgress": false,
+          "dependencyCount": 0,
+          "testSecretCount": 1
+        },
+        "captured": false
+      },
+      "secondStartRefused": true,
+      "isolation": {
+        "noMounts": true,
+        "noPrivileges": true,
+        "internalNetwork": true,
+        "noHostNetwork": true,
+        "noAddedCapabilities": true,
+        "noDevices": true,
+        "noHostPidOrIpc": true,
+        "noPublishedPorts": true,
+        "capDropAll": true,
+        "noNewPrivileges": true,
+        "memory": 536870912,
+        "nanoCpus": 1000000000,
+        "pids": 64
+      },
+      "previousReportPreserved": true,
+      "previousReport": {
+        "version": 1,
+        "result": "not executed",
+        "executionId": "at-200-runtime-dc257fc4",
+        "workId": "AT-200-runtime",
+        "workName": "AT-200-runtime",
+        "source": {
+          "checkout": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe"
+        },
+        "configuration": {
+          "path": "opencode-sandbox.json",
+          "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+          "parameters": {
+            "dockerfile": "Dockerfile",
+            "context": ".",
+            "stage": "probe",
+            "allowExternalEgress": false,
+            "dependencyCount": 0,
+            "testSecretCount": 1
+          },
+          "captured": false
+        },
+        "startedAt": "2026-11-16T14:45:09.486Z",
+        "concludedAt": "2026-11-16T14:45:11.075Z",
+        "capture": {
+          "branch": null,
+          "head": null,
+          "files": 38,
+          "fingerprint": "5df7fdec61f4a53dc4c216f8dac917cb5fd432d52646363114e354827826b56d"
+        },
+        "engine": {
+          "schemaVersion": 1,
+          "endpoint": "unix:///Users/oicrruf/.docker/run/docker.sock",
+          "platform": "darwin",
+          "id": "38272e5f-761f-4a7b-be8c-e2e128eb7e73",
+          "osType": "linux",
+          "operatingSystem": "Docker Desktop",
+          "version": "29.7.2",
+          "architecture": "aarch64"
+        },
+        "image": "sandbox/at-200-runtime:at-200-runtime-dc257fc4",
+        "container": "sandbox-at-200-runtime-dc257fc4",
+        "network": "sandbox-net-at-200-runtime-dc257fc4",
+        "steps": [
+          "explicit sandbox replacement or transition recovery"
+        ],
+        "differencesFromProduction": [],
+        "secretNames": [
+          "OPENCODE_PASSWORD"
+        ],
+        "approved": false,
+        "note": "starting the environment does not approve the product"
+      }
+    }
+  ],
+  "limitations": [
+    "The host controller context uses a fixture project-scoped listing; real V2 loading is observed separately inside the sandbox."
+  ],
+  "engine": {
+    "schemaVersion": 1,
+    "endpoint": "unix:///Users/oicrruf/.docker/run/docker.sock",
+    "platform": "darwin",
+    "id": "38272e5f-761f-4a7b-be8c-e2e128eb7e73",
+    "osType": "linux",
+    "operatingSystem": "Docker Desktop",
+    "version": "29.7.2",
+    "architecture": "aarch64"
+  },
+  "result": "passed",
+  "bootstrap": {
+    "ok": true,
+    "directory": "/fixture"
+  },
+  "v2ToolRegistrationCounts": {
+    "sandbox_build": 1,
+    "sandbox_rebuild": 1,
+    "sandbox_transfer": 1,
+    "sandbox_recover_transition": 1,
+    "sandbox_start": 1,
+    "sandbox_status": 1,
+    "sandbox_finish": 1,
+    "sandbox_cancel": 1,
+    "sandbox_recover": 1,
+    "reservation_start": 1,
+    "reservation_stop": 1,
+    "reservation_recover": 1,
+    "sandbox_preflight": 1,
+    "sandbox_supervisor": 1,
+    "worktree_create": 1,
+    "worktree_list": 1,
+    "worktree_capacity": 1,
+    "worktree_candidates": 1,
+    "worktree_retire": 1,
+    "worktree_lock": 1,
+    "worktree_reconcile": 1
+  },
+  "commandProof": {
+    "count": 8,
+    "toolCalls": 0,
+    "modelCalls": 0,
+    "usageSeen": true,
+    "invalidSeen": true,
+    "messageCount": 0,
+    "syntheticSeen": true,
+    "responseScope": "canonical context and pending synthetic inbox",
+    "modelRequired": false,
+    "native": true
+  },
+  "closure": {
+    "ok": true,
+    "quotaReleased": true,
+    "reportPath": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe/.opencode/state/sandbox/reports/at-200-runtime-24900ba5.json"
+  },
+  "sandboxReport": {
+    "version": 1,
+    "result": "passed",
+    "executionId": "at-200-runtime-24900ba5",
+    "workId": "AT-200-runtime",
+    "workName": "AT-200-runtime",
+    "source": {
+      "checkout": "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/at200-runtime-32UFEe"
+    },
+    "configuration": {
+      "path": "opencode-sandbox.json",
+      "fingerprint": "7d036cf846101f24fd0eda147d30082d7653a8c5f3db6d38b3e933b6201b49e8",
+      "parameters": {
+        "dockerfile": "Dockerfile",
+        "context": ".",
+        "stage": "probe",
+        "allowExternalEgress": false,
+        "dependencyCount": 0,
+        "testSecretCount": 1
+      },
+      "captured": false
+    },
+    "startedAt": "2026-11-16T14:45:13.197Z",
+    "concludedAt": "2026-11-16T14:45:18.516Z",
+    "capture": {
+      "branch": null,
+      "head": null,
+      "files": 38,
+      "fingerprint": "5df7fdec61f4a53dc4c216f8dac917cb5fd432d52646363114e354827826b56d"
+    },
+    "engine": {
+      "schemaVersion": 1,
+      "endpoint": "unix:///Users/oicrruf/.docker/run/docker.sock",
+      "platform": "darwin",
+      "id": "38272e5f-761f-4a7b-be8c-e2e128eb7e73",
+      "osType": "linux",
+      "operatingSystem": "Docker Desktop",
+      "version": "29.7.2",
+      "architecture": "aarch64"
+    },
+    "image": "sandbox/at-200-runtime:at-200-runtime-24900ba5",
+    "container": "sandbox-at-200-runtime-24900ba5",
+    "network": "sandbox-net-at-200-runtime-24900ba5",
+    "steps": [
+      "AT-200 real build, rebuild, transfer, V2 registration and native command proof"
+    ],
+    "differencesFromProduction": [
+      "fixture session/listing on controller; OpenCode V2 and application run inside isolated Docker Desktop Linux runtime"
+    ],
+    "secretNames": [
+      "OPENCODE_PASSWORD"
+    ],
+    "approved": false,
+    "note": "starting the environment does not approve the product"
+  }
+}

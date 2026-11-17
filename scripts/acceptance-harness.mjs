@@ -908,6 +908,9 @@ check('the sandbox tool grants match the intended agents', () => {
         offenders.push(`${agent}: ${family} is ${perms[family] ?? '(unset)'}, expected allow`);
       }
     }
+    for (const operation of ['sandbox_release', 'sandbox_transfer']) {
+      if (perms[operation] !== 'ask') offenders.push(`${agent}: ${operation} is ${perms[operation] ?? '(unset)'}, expected ask`);
+    }
   }
   for (const agent of denied) {
     const perms = cfg.agent?.[agent]?.permission ?? {};
@@ -1002,7 +1005,10 @@ check('the sandbox module tests pass without Docker', () => {
   assert(!/fail [1-9]/.test(lifecycle), `the lifecycle tests failed:\n${lifecycle}`);
   const boundaries = run(process.execPath, [join(dir, 'boundaries.test.mjs')]);
   assert(!/fail [1-9]/.test(boundaries), `the boundary tests failed:\n${boundaries}`);
-  return 'the reservation, capture, lifecycle, and boundary tests pass on a host without Docker';
+  for (const file of ['source.test.mjs', 'configuration.test.mjs', 'command.test.mjs', 'operation.test.mjs', 'transition.test.mjs', 'plugin-v2-integration.test.mjs']) {
+    run(process.execPath, [join(dir, file)]);
+  }
+  return 'reservation, capture, lifecycle, boundaries, command, transition/concurrency and V2 fixtures pass without Docker';
 });
 
 // ---------------------------------------------------------------------------

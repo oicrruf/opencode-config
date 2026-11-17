@@ -84,8 +84,11 @@ validators.
   outside the canonical checkout and records it in the project's inventory.
   Retirement requires an explicit request with the worktree, branch, base,
   expected head, and evidence; it is blocked by local changes, unpublished
-  commits, process access, unrecognized ignored files, unsafe paths, or
-  unverifiable checks. Evidence is preserved before removal, the remote
+  commits, host process access, active local container bind mounts,
+  unrecognized ignored files, unsafe paths, or unverifiable checks. If a
+  Compose app still binds the worktree, release it with `/sandbox release`
+  before retrying retirement; retirement is serialized with sandbox mutations
+  and never removes persistent volumes. Evidence is preserved before removal, the remote
   branch and published commits are never removed, and age/capacity never
   retire a worktree. The legacy `.opencode/worktree/` path remains ignored
   for compatibility only.

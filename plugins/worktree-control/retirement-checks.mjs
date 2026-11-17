@@ -12,6 +12,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { inspectLocalEngine, boundDocker } from "../sandbox-control/engine.mjs";
+import { canonicalBindSource } from "../sandbox-control/compose-resources.mjs";
 
 /**
  * The checks that block a retirement.
@@ -20,6 +22,7 @@ export const BLOCKING_CHECKS = [
   "localChanges",
   "unpublishedCommits",
   "processAccess",
+  "containerAccess",
   "unrecognizedIgnoredFiles",
   "unsafePath",
 ];
@@ -195,6 +198,64 @@ export function checkProcessAccess(directory, deps = {}) {
     processes: holders.map((process) => ({ pid: process.pid ?? null, cwd: process.cwd ?? null })),
     reason: holders.length > 0 ? "a process has the worktree open" : null,
   };
+}
+
+/** Refuse retirement while a local container bind-mounts the worktree.
+ * Docker Desktop reports some host paths through its /host_mnt namespace;
+ * normalize that prefix only for the positively verified Desktop engine. */
+export function checkContainerAccess(directory, deps = {}) {
+  const inspectEngine = deps.inspectLocalEngine ?? inspectLocalEngine;
+  const getBoundDocker = deps.boundDocker ?? boundDocker;
+  let engine;
+  try { engine = inspectEngine(deps.engineDeps ?? {}); }
+  catch { return { ok: false, available: false, blocked: true, reason: "the local container engine could not be verified" }; }
+  if (!engine?.ok) {
+    // No verified local engine can be running a container against this
+    // host worktree. Remote Docker endpoints are deliberately out of scope.
+    return { ok: true, available: true, blocked: false, containers: [], reason: null,
+      note: "no verified local container engine is available" };
+  }
+  let docker;
+  try { docker = getBoundDocker(engine.binding, deps.engineDeps ?? {}); }
+  catch { return { ok: false, available: false, blocked: true, reason: "the verified local container engine could not be bound safely" }; }
+  const root = canonicalPath(directory);
+  const inside = (candidate) => {
+    const rel = relative(root, canonicalBindSource(candidate, engine.binding.platform ?? process.platform));
+    return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`));
+  };
+  try {
+    const listing = String(docker("docker", ["ps", "--no-trunc", "--format", "{{.ID}}"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024,
+    })).trim();
+    const ids = listing ? listing.split(/\s+/) : [];
+    const conflicts = [];
+    for (const id of ids) {
+      if (!/^[a-f0-9]{12,64}$/i.test(id)) throw new Error("invalid container identity");
+      const output = String(docker("docker", ["inspect", "--format", "{{.State.Status}}\t{{json .Mounts}}", id], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1024 * 1024,
+      })).trim();
+      const tab = output.indexOf("\t");
+      if (tab < 0) throw new Error("invalid container mount metadata");
+      const state = output.slice(0, tab);
+      if (!["running", "paused", "restarting"].includes(state)) continue;
+      const mounts = JSON.parse(output.slice(tab + 1));
+      if (!Array.isArray(mounts)) throw new Error("invalid container mount metadata");
+      const destinations = [];
+      for (const mount of mounts) {
+        if (mount?.Type !== "bind") continue;
+        if (typeof mount.Source !== "string" || !mount.Source.startsWith("/")) throw new Error("invalid bind mount metadata");
+        if (inside(mount.Source) && typeof mount.Destination === "string") destinations.push(mount.Destination);
+      }
+      if (destinations.length) conflicts.push({ containerId: id, destinations: [...new Set(destinations)].sort() });
+    }
+    return conflicts.length
+      ? { ok: true, available: true, blocked: true, containers: conflicts,
+          reason: "a running container bind-mounts the worktree; run /sandbox release before retirement" }
+      : { ok: true, available: true, blocked: false, containers: [], reason: null };
+  } catch {
+    return { ok: false, available: false, blocked: true,
+      reason: "running container mounts could not be verified on the local engine" };
+  }
 }
 
 /**
@@ -373,6 +434,7 @@ export function runBlockingChecks(input) {
     localChanges: checkLocalChanges(directory, deps),
     unpublishedCommits: checkUnpublishedCommits(directory, branch, deps),
     processAccess: checkProcessAccess(directory, deps),
+    containerAccess: checkContainerAccess(directory, deps),
     unrecognizedIgnoredFiles: checkIgnoredFiles(directory, recognizedIgnored, deps),
     unsafePath: checkPathSafety(directory, expectedRoot, deps),
   };

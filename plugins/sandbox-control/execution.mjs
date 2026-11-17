@@ -1,3 +1,4 @@
+import { withSandboxOperation } from "./operation.mjs";
 // The local execution start, the stop, and the process supervisor.
 //
 // An application is launched directly — never through a shell — so no
@@ -15,8 +16,8 @@
 import { spawn, execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, lstatSync, statSync } from "node:fs";
+import { join, relative, sep } from "node:path";
 import { screenArguments } from "./secret-screen.mjs";
 import {
   acquireReservation,
@@ -26,10 +27,44 @@ import {
   tokenMatches,
   updateReservationProcessGroup,
   readReservation,
+  activateApplicationHandoff,
 } from "./reservation.mjs";
-import { ensureDir, reservationDir } from "./paths.mjs";
+import { ensureDir, reservationDir, canonicalPath, isInside } from "./paths.mjs";
+import { inspectLocalEngine, boundDocker } from "./engine.mjs";
+import { readComposePersistentMounts, persistentMountSetsMatch } from "./compose-resources.mjs";
 
 const SUPERVISOR_FILE = "supervisor.json";
+
+function verifiedComposeFile(rootPath, filePath) {
+  const root = canonicalPath(rootPath);
+  const file = canonicalPath(filePath);
+  if (!isInside(root, file) || file !== filePath) return false;
+  let cursor = root;
+  for (const part of relative(root, file).split(sep)) {
+    cursor = join(cursor, part);
+    try { if (lstatSync(cursor).isSymbolicLink()) return false; } catch { return false; }
+  }
+  try { return statSync(file).isFile(); } catch { return false; }
+}
+
+function inspectComposeApplicationAbsence(reservation, deps) {
+  if (!reservation.composeProject) {
+    const executable = String(reservation.executable ?? "").toLowerCase();
+    if (executable === "docker" || executable === "docker-compose" || executable === "podman-compose") {
+      return { ok: false, reason: "the container runtime reservation has no recorded Compose project identity" };
+    }
+    return { ok: true, absent: true };
+  }
+  try {
+    const engine = inspectLocalEngine(deps);
+    if (!engine.ok || engine.binding.id !== reservation.composeEngineId) return { ok: false, reason: "the recorded Compose engine is unavailable or changed" };
+    const docker = boundDocker(engine.binding, deps);
+    const ids = String(docker("docker", ["ps", "--all", "--no-trunc", "--filter", `label=com.docker.compose.project=${reservation.composeProject}`, "--format", "{{.ID}}"], {
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024,
+    })).trim();
+    return { ok: true, absent: !ids };
+  } catch { return { ok: false, reason: "the Compose resources cannot be reconciled on the recorded engine" }; }
+}
 
 /**
  * Confirm that a managed worktree exists for the work.
@@ -65,7 +100,7 @@ export async function confirmManagedWorktree(worktreeApi, workId) {
  * executable is stored. The owner token is returned to the caller and
  * never recorded in the reservation in clear text.
  */
-export async function startLocalExecution(cwd, input, deps = {}) {
+async function startLocalExecutionImpl(cwd, input, deps = {}) {
   const {
     workId,
     workName,
@@ -75,6 +110,8 @@ export async function startLocalExecution(cwd, input, deps = {}) {
     env = {},
     sessionId = "",
     worktreeApi = null,
+    token = null,
+    composeFile = null,
   } = input ?? {};
 
   if (!workId) return { ok: false, reason: "the start needs a work identifier" };
@@ -95,22 +132,47 @@ export async function startLocalExecution(cwd, input, deps = {}) {
   // The quota is acquired before the process is launched, so a second
   // session is refused before anything runs. The reservation is
   // released again if the launch fails.
-  const acquired = acquireReservation(cwd, {
-    workId,
-    workName,
-    scope: "application",
-    supervisorPid: String(process.pid),
-    sessionId,
-    executable: executable.split(/[\\/]/).pop(),
-    processGroup: null,
-  });
-  if (!acquired.ok) {
-    return {
-      ok: false,
-      blocked: true,
-      reason: acquired.reason,
-      heldBy: acquired.heldBy,
-    };
+  const existing = readReservation(cwd);
+  let acquired;
+  let resumingHandoff = false;
+  let handoffRuntime = null;
+  if (!existing.ok) return { ok: false, blocked: true, reason: "the project reservation is unverifiable" };
+  if (existing.state === "held") {
+    const record = existing.reservation;
+    if (record.scope !== "application" || record.awaitingStart !== true || record.workId !== workId ||
+        record.sessionId !== sessionId || !record.handoffComposeFile || !Array.isArray(record.handoffPersistentMounts)) {
+      return { ok: false, blocked: true, reason: "the project application slot is held by another owner or is not awaiting this handoff" };
+    }
+    const owner = verifyOwner(cwd, token);
+    if (!owner.ok) return { ok: false, blocked: true, reason: owner.reason };
+    if (typeof composeFile !== "string" || composeFile !== record.handoffComposeFile || !verifiedComposeFile(worktree.worktree.directory, record.handoffComposeFile) ||
+        programCwd && programCwd !== worktree.worktree.directory || executable.split(/[\\/]/).pop() !== "docker" ||
+        JSON.stringify(args) !== JSON.stringify(["compose", "--project-directory", record.handoffComposeFile.slice(0, record.handoffComposeFile.lastIndexOf("/")), "-f", record.handoffComposeFile, "up"])) {
+      return { ok: false, blocked: true, reason: "handoff start must run the exact verified destination Compose file in foreground mode" };
+    }
+    const engine = inspectLocalEngine(deps);
+    if (!engine.ok) return { ok: false, blocked: true, reason: engine.reason };
+    try {
+      const docker = boundDocker(engine.binding, deps);
+      const target = readComposePersistentMounts(docker, { worktreePath: worktree.worktree.directory, composeFilePath: record.handoffComposeFile });
+      if (!target.ok || !persistentMountSetsMatch(record.handoffPersistentMounts, target.mounts)) {
+        return { ok: false, blocked: true, reason: "the destination persistent mounts changed after handoff; the reservation remains awaiting-start" };
+      }
+      if (target.projectName !== record.handoffComposeProject || engine.binding.id !== record.handoffEngineId) {
+        return { ok: false, blocked: true, reason: "the destination Compose project or engine changed after handoff" };
+      }
+      handoffRuntime = { composeProject: target.projectName, engineId: engine.binding.id };
+    } catch { return { ok: false, blocked: true, reason: "the destination Compose file could not be reverified before start" }; }
+    acquired = { ok: true, token };
+    resumingHandoff = true;
+  } else {
+    acquired = acquireReservation(cwd, {
+      workId, workName, scope: "application", supervisorPid: String(process.pid), sessionId,
+      executable: executable.split(/[\\/]/).pop(), processGroup: null,
+    });
+    if (!acquired.ok) {
+      return { ok: false, blocked: true, reason: acquired.reason, heldBy: acquired.heldBy };
+    }
   }
 
   const spawnFn = deps.spawn ?? spawn;
@@ -126,7 +188,7 @@ export async function startLocalExecution(cwd, input, deps = {}) {
   } catch (err) {
     // The launch failed, so the reservation is given back with the same
     // verification every release requires.
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
+    if (!resumingHandoff) releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
     return { ok: false, reason: `the application could not be started: ${err.message}` };
   }
 
@@ -137,7 +199,7 @@ export async function startLocalExecution(cwd, input, deps = {}) {
   const launch = await waitForLaunch(child, deps.launchTimeoutMs ?? 1000);
 
   if (!launch.ok) {
-    releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
+    if (!resumingHandoff) releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
     return {
       ok: false,
       reason: `the application could not be started: ${launch.reason}`,
@@ -148,7 +210,10 @@ export async function startLocalExecution(cwd, input, deps = {}) {
 
   // The process group is recorded on the reservation, so a stop knows
   // which group it owns.
-  updateReservationProcessGroup(cwd, acquired.token, processGroup);
+  const updated = resumingHandoff
+    ? activateApplicationHandoff(cwd, acquired.token, processGroup, handoffRuntime)
+    : updateReservationProcessGroup(cwd, acquired.token, processGroup);
+  if (!updated.ok) return { ok: false, blocked: true, reason: updated.reason, token: acquired.token, processGroup };
 
   return {
     ok: true,
@@ -272,7 +337,7 @@ function defaultListProcesses(processGroup) {
  * the reservation signals only the managed group, and the reservation
  * is released only after the group is confirmed to be gone.
  */
-export async function stopLocalExecution(cwd, token, deps = {}) {
+async function stopLocalExecutionImpl(cwd, token, deps = {}) {
   const verified = verifyOwner(cwd, token);
   if (!verified.ok) {
     return { ok: false, signalled: false, released: false, reason: verified.reason };
@@ -296,6 +361,11 @@ export async function stopLocalExecution(cwd, token, deps = {}) {
     };
   }
 
+  const composeState = inspectComposeApplicationAbsence(reservation, deps);
+  if (!composeState.ok || !composeState.absent) {
+    return { ok: false, signalled: true, released: false, reason: composeState.reason ?? "Compose containers remain, so the reservation is kept" };
+  }
+
   const released = releaseReservation(cwd, token, { resourcesAbsent: true });
   if (!released.ok) {
     return { ok: false, signalled: true, released: false, reason: released.reason };
@@ -307,7 +377,7 @@ export async function stopLocalExecution(cwd, token, deps = {}) {
  * Close the descendants that remain in the reservation's group when the
  * application ended on its own.
  */
-export function closeRemainingDescendants(cwd, token, deps = {}) {
+function closeRemainingDescendantsImpl(cwd, token, deps = {}) {
   const verified = verifyOwner(cwd, token);
   if (!verified.ok) return { ok: false, reason: verified.reason };
   const reservation = verified.reservation;
@@ -316,6 +386,8 @@ export function closeRemainingDescendants(cwd, token, deps = {}) {
     return { ok: false, reason: state.reason, closed: false };
   }
   if (!state.hasProcesses) {
+    const composeState = inspectComposeApplicationAbsence(reservation, deps);
+    if (!composeState.ok || !composeState.absent) return { ok: false, reason: composeState.reason ?? "Compose containers remain; the reservation is kept", closed: false, released: false };
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     return {
       ok: true,
@@ -368,7 +440,7 @@ export function evaluateAmbiguity(cwd, input = {}) {
  * and its group is empty, and it records the reservation it acted on so
  * a retry does not release a different one.
  */
-export function recoverReservation(cwd, input = {}, deps = {}) {
+function recoverReservationImpl(cwd, input = {}, deps = {}) {
   const { token = null } = input;
   const current = readReservation(cwd);
   if (!current.ok || current.state !== "held") return { ok: false, released: false, reason: current.reason ?? "there is no held reservation" };
@@ -384,6 +456,9 @@ export function recoverReservation(cwd, input = {}, deps = {}) {
   if (!decision.recoverable) {
     return { ok: false, released: false, reason: decision.reason };
   }
+
+  const composeState = inspectComposeApplicationAbsence(reservation, deps);
+  if (!composeState.ok || !composeState.absent) return { ok: false, released: false, reason: composeState.reason ?? "Compose containers remain; recovery keeps the reservation" };
 
   if (!token || !tokenMatchesForReservation(token, reservation)) {
     return {
@@ -412,7 +487,7 @@ function tokenMatchesForReservation(token, reservation) {
  * not take the watch with it. Its state is persisted next to the
  * reservation.
  */
-export async function armSupervisor(cwd, input, deps = {}) {
+async function armSupervisorImpl(cwd, input, deps = {}) {
   const { workId, workName, processGroup, deadlineAt = null, tokenId, executionId, token } = input ?? {};
   const dir = reservationDir(cwd);
   if (!dir.ok) return { ok: false, reason: dir.reason };
@@ -472,14 +547,20 @@ export function readSupervisor(cwd) {
 /**
  * Disarm the supervisor once the run is closed.
  */
-export function disarmSupervisor(cwd) {
+function disarmSupervisorImpl(cwd, executionId = null) {
   const dir = reservationDir(cwd);
   if (!dir.ok) return { ok: false, reason: dir.reason };
   const path = join(dir.dir, SUPERVISOR_FILE);
+  if (executionId !== null) {
+    const current = readSupervisor(cwd);
+    if (!current.ok || (current.supervisor && current.supervisor.executionId !== executionId)) {
+      return { ok: false, blocked: true, reason: "the supervisor does not belong to this execution" };
+    }
+  }
   try {
     unlinkSync(path);
-  } catch {
-    // A supervisor that was never armed is already disarmed.
+  } catch (error) {
+    if (error.code !== "ENOENT") return { ok: false, reason: "the supervisor record could not be removed" };
   }
   return { ok: true };
 }
@@ -506,4 +587,29 @@ function inspectOwner(reservation) {
   } catch (error) {
     return { ok: false, ended: null, reason: `the recorded owner process could not be inspected: ${error.message}` };
   }
+}
+
+// All mutating entrypoints share the same cross-process operation boundary.
+export function startLocalExecution(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "startLocalExecution", () => startLocalExecutionImpl(...args));
+}
+
+export function stopLocalExecution(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "stopLocalExecution", () => stopLocalExecutionImpl(...args));
+}
+
+export function closeRemainingDescendants(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "closeRemainingDescendants", () => closeRemainingDescendantsImpl(...args));
+}
+
+export function recoverReservation(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "recoverReservation", () => recoverReservationImpl(...args));
+}
+
+export function armSupervisor(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "armSupervisor", () => armSupervisorImpl(...args));
+}
+
+export function disarmSupervisor(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "disarmSupervisor", () => disarmSupervisorImpl(...args));
 }

@@ -135,7 +135,7 @@ export const WorktreeControlPlugin = async () => {
         description:
           "List the worktrees that are safe to consider for a retirement, with the state that makes " +
           "each one a candidate and the condition that would block it, ordered by age. " +
-          "Listing never retires anything: a retirement requires an explicit request.",
+          "Active local container bind mounts are reported as blockers too. Listing never retires anything: a retirement requires an explicit request.",
         args: {},
         async execute(args, context) {
           const project = projectContext(context);
@@ -154,7 +154,8 @@ export const WorktreeControlPlugin = async () => {
           "Retire a worktree. The request must name the worktree, its branch, the base it " +
           "integrates into, the expected head, and the evidence that the work was integrated. " +
           "The retirement is refused when the worktree holds local changes, unpublished commits, " +
-          "a process with access, unrecognized ignored files, or an unsafe path. " +
+          "a host process or active container bind mount, unrecognized ignored files, or an unsafe path. " +
+          "Release a held application with /sandbox release, then retry retirement. " +
           "The remote branch and the published commits are never removed.",
         args: {
           worktree: { type: "string", description: "the directory of the worktree to retire", required: true },
