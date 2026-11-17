@@ -300,6 +300,17 @@ test("a Docker Desktop bind mount blocks retirement and points to sandbox releas
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("an unavailable or unverifiable local engine blocks retirement", () => {
+  const result = checkContainerAccess("/tmp/wt", {
+    inspectLocalEngine: () => ({ ok: false, blocked: true, reason: "engine metadata could not be verified" }),
+    boundDocker: () => { throw new Error("must not inspect through an unverified engine"); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.available, false);
+  assert.equal(result.blocked, true);
+  assert.match(result.reason, /metadata could not be verified/);
+});
+
 test("worktree retirement serializes with sandbox operations and releases its lock on conflict", async () => {
   await withRepo(async (root) => {
     let unlock;

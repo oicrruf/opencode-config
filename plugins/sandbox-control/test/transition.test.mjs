@@ -8,11 +8,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeSandboxOperation, recoverSandboxTransition } from "../transition.mjs";
-import { readReservation, acquireReservation, verifyOwner } from "../reservation.mjs";
-import { readTransition } from "../operation.mjs";
+import { readReservation, acquireReservation, verifyOwner, releaseVerifiedReservation } from "../reservation.mjs";
+import { readTransition, withSandboxOperation, writeTransition } from "../operation.mjs";
 import { recordWorktree } from "../../worktree-control/inventory.mjs";
 import { withEngineStub } from "./engine-fixture.mjs";
-import { finishSandbox, writeExecutionRecord, readExecutionRecord } from "../lifecycle.mjs";
+import { finishSandbox, writeExecutionRecord, readExecutionRecord, closeTransitionExecution } from "../lifecycle.mjs";
 
 function fixture(t) {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "sandbox-transition-")));
@@ -156,6 +156,54 @@ test("incomplete cleanup keeps the old reservation; explicit recovery only close
   assert.equal(readReservation(f.dir).state, "free");
   assert.equal(f.calls.some((args) => args[0] === "build"), false);
   assert.equal(readTransition(f.dir).transition.phase, "recovered");
+});
+
+test("release-only transition recovery closes the previous execution without a successor", async (t) => {
+  const f = fixture(t);
+  const first = await f.request("build");
+  const reservation = readReservation(f.dir).reservation;
+  const journal = {
+    workId: reservation.workId, worktreePath: f.dir, sessionId: "session-one",
+    previousExecutionId: reservation.executionId, previousGeneration: reservation.generation,
+  };
+  const written = withSandboxOperation(f.dir, "fixtureReleaseIntent", () =>
+    writeTransition(f.dir, { ...journal, phase: "intent" }));
+  assert.equal(written.ok, true, written.reason);
+
+  const recovered = await recoverSandboxTransition({ ...f.context, sessionID: "session-two" }, f.deps);
+  assert.equal(recovered.ok, true, recovered.reason);
+  assert.equal(recovered.quotaReleased, true);
+  assert.equal(readReservation(f.dir).state, "free");
+  assert.equal(readTransition(f.dir).transition.phase, "recovered");
+  assert.equal(readExecutionRecord(f.dir, first.execution.executionId).record.phase, "closed");
+});
+
+test("free reservation recovery verifies the previous execution for a release-only journal", async (t) => {
+  const f = fixture(t);
+  const first = await f.request("build");
+  const reservation = readReservation(f.dir).reservation;
+  const journal = {
+    workId: reservation.workId, worktreePath: f.dir, sessionId: "session-one",
+    previousExecutionId: reservation.executionId, previousGeneration: reservation.generation,
+  };
+  const setup = withSandboxOperation(f.dir, "fixtureReleaseClosed", () => {
+    const intent = writeTransition(f.dir, { ...journal, phase: "intent" });
+    if (!intent.ok) return intent;
+    const closed = closeTransitionExecution(f.dir, reservation.executionId, f.deps);
+    if (!closed.ok) return closed;
+    const released = releaseVerifiedReservation(f.dir, reservation, { resourcesAbsent: true });
+    if (!released.ok) return released;
+    const written = writeTransition(f.dir, { ...journal, phase: "closed" });
+    return written.ok ? { ...written, reportPath: closed.reportPath } : written;
+  });
+  assert.equal(setup.ok, true, setup.reason);
+
+  const recovered = await recoverSandboxTransition(f.context, f.deps);
+  assert.equal(recovered.ok, true, recovered.reason);
+  assert.equal(recovered.recovered, true);
+  assert.equal(readTransition(f.dir).transition.phase, "recovered");
+  assert.equal(readExecutionRecord(f.dir, first.execution.executionId).ok, false);
+  assert.equal(existsSync(setup.reportPath), true);
 });
 
 test("changed config after old closure retains successor reservation for explicit recovery", async (t) => {

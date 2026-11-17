@@ -116,7 +116,9 @@ export function discoverComposeProject(docker, { projectRoot, workId, worktreePa
   const root = canonicalPath(projectRoot);
   const worktree = canonicalPath(worktreePath);
   try {
-    const listing = String(docker("docker", ["ps", "--all", "--no-trunc", "--format", "{{.ID}}"], {
+    // The label-presence filter positively excludes standalone containers
+    // while retaining every Compose-labeled container for strict inspection.
+    const listing = String(docker("docker", ["ps", "--all", "--no-trunc", "--filter", `label=${LABEL_PROJECT}`, "--format", "{{.ID}}"], {
       encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 256 * 1024,
     })).trim();
     const ids = listing ? listing.split(/\s+/) : [];
@@ -198,8 +200,11 @@ export function readComposePersistentMounts(docker, { worktreePath, composeFileP
     const volumes = config.volumes && typeof config.volumes === "object" && !Array.isArray(config.volumes) ? config.volumes : {};
     const mounts = [];
     for (const service of Object.values(config.services)) {
-      if (!service || !Array.isArray(service.volumes)) return blocked("the target Compose services have unverifiable mount declarations");
-      for (const item of service.volumes) {
+      if (!service || typeof service !== "object" || Array.isArray(service) ||
+          (service.volumes !== undefined && !Array.isArray(service.volumes))) {
+        return blocked("the target Compose services have unverifiable mount declarations");
+      }
+      for (const item of service.volumes ?? []) {
         if (!item || typeof item !== "object" || !boundedString(item.target) || !["bind", "volume"].includes(item.type)) {
           return blocked("the target Compose file contains an unsupported mount declaration");
         }

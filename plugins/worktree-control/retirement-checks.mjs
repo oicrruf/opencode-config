@@ -210,10 +210,8 @@ export function checkContainerAccess(directory, deps = {}) {
   try { engine = inspectEngine(deps.engineDeps ?? {}); }
   catch { return { ok: false, available: false, blocked: true, reason: "the local container engine could not be verified" }; }
   if (!engine?.ok) {
-    // No verified local engine can be running a container against this
-    // host worktree. Remote Docker endpoints are deliberately out of scope.
-    return { ok: true, available: true, blocked: false, containers: [], reason: null,
-      note: "no verified local container engine is available" };
+    return { ok: false, available: false, blocked: true,
+      reason: engine?.reason ?? "the local container engine could not be verified" };
   }
   let docker;
   try { docker = getBoundDocker(engine.binding, deps.engineDeps ?? {}); }

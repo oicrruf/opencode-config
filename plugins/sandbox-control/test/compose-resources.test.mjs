@@ -122,6 +122,25 @@ test("multiple Compose projects attached to one worktree are ambiguous", () => {
   assert.match(result.reason, /multiple Compose projects/);
 });
 
+test("Compose discovery filters out standalone containers but strictly inspects Compose-labeled ones", () => {
+  const candidate = container(idA, "wordpress", [{ Type: "bind", Source: WORK, Destination: "/app", RW: true }]);
+  const calls = [];
+  const docker = (_command, args) => {
+    calls.push(args);
+    if (args[0] === "ps") {
+      assert.ok(args.includes(`label=com.docker.compose.project`));
+      return idA; // Docker's label filter excludes the unrelated standalone container.
+    }
+    if (args[0] === "inspect") return inspectOutput(candidate);
+    throw new Error("unexpected Docker call");
+  };
+  const result = discoverComposeProject(docker, {
+    projectRoot: ROOT, workId: "feature-a", worktreePath: WORK, worktreeVerified: true, engineId: "fixture-daemon",
+  });
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(calls.some((args) => args[0] === "inspect" && args.at(-1) !== idA), false);
+});
+
 test("manifest rejects unapproved or secret-bearing fields", () => {
   const manifest = {
     schemaVersion: 1, project: PROJECT, workId: "feature-a", projectRoot: ROOT, worktreePath: WORK,

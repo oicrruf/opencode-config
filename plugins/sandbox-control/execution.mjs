@@ -30,7 +30,7 @@ import {
   activateApplicationHandoff,
 } from "./reservation.mjs";
 import { ensureDir, reservationDir, canonicalPath, isInside } from "./paths.mjs";
-import { inspectLocalEngine, boundDocker } from "./engine.mjs";
+import { inspectLocalEngine, boundDocker, boundEngineEnvironment } from "./engine.mjs";
 import { readComposePersistentMounts, persistentMountSetsMatch } from "./compose-resources.mjs";
 
 const SUPERVISOR_FILE = "supervisor.json";
@@ -161,7 +161,7 @@ async function startLocalExecutionImpl(cwd, input, deps = {}) {
       if (target.projectName !== record.handoffComposeProject || engine.binding.id !== record.handoffEngineId) {
         return { ok: false, blocked: true, reason: "the destination Compose project or engine changed after handoff" };
       }
-      handoffRuntime = { composeProject: target.projectName, engineId: engine.binding.id };
+      handoffRuntime = { composeProject: target.projectName, engineId: engine.binding.id, binding: engine.binding };
     } catch { return { ok: false, blocked: true, reason: "the destination Compose file could not be reverified before start" }; }
     acquired = { ok: true, token };
     resumingHandoff = true;
@@ -177,10 +177,15 @@ async function startLocalExecutionImpl(cwd, input, deps = {}) {
 
   const spawnFn = deps.spawn ?? spawn;
   let child;
+  let launchEnvironment = env;
+  if (resumingHandoff) {
+    try { launchEnvironment = boundEngineEnvironment(handoffRuntime.binding, deps.env ?? process.env); }
+    catch { return { ok: false, blocked: true, reason: "the verified Compose launch environment is unavailable; the handoff reservation remains held" }; }
+  }
   try {
     child = spawnFn(executable, args, {
       cwd: programCwd ?? worktree.worktree.directory,
-      env,
+      env: launchEnvironment,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,

@@ -8,13 +8,15 @@ import { execFileSync } from "node:child_process";
 import { withSandboxOperation } from "../operation.mjs";
 import { acquireReservation, handoffApplicationReservation, readReservation } from "../reservation.mjs";
 import { startLocalExecution, stopLocalExecution } from "../execution.mjs";
-import { withEngineStub } from "./engine-fixture.mjs";
+import { fixtureBinding, withEngineStub } from "./engine-fixture.mjs";
 
-function config(volumeName = "shared_db") {
-  return JSON.stringify({ name: "target-compose", services: { db: { volumes: [
+function config(volumeName = "shared_db", volumeFreeService = false) {
+  const value = { name: "target-compose", services: { db: { volumes: [
     { type: "volume", source: volumeName, target: "/var/lib/db", read_only: false },
     { type: "bind", source: "/tmp/shared-uploads", target: "/app/uploads", read_only: false },
-  ] } }, volumes: { [volumeName]: { name: volumeName } } });
+  ] } }, volumes: { [volumeName]: { name: volumeName } } };
+  if (volumeFreeService) value.services.web = { image: "fixture/web" };
+  return JSON.stringify(value);
 }
 
 async function fixture(t, volumeName = "shared_db") {
@@ -51,14 +53,15 @@ function startInput(f, overrides = {}) {
   };
 }
 
-function deps(f, { onSpawn = () => {}, volumeName = "shared_db" } = {}) {
+function deps(f, { onSpawn = () => {}, volumeName = "shared_db", volumeFreeService = false, env } = {}) {
   return {
     ...withEngineStub((_command, args) => {
-      if (args[0] === "compose") return config(volumeName);
+      if (args[0] === "compose") return config(volumeName, volumeFreeService);
       throw new Error("unexpected Docker operation");
     }),
-    spawn(_executable, _args) {
-      onSpawn();
+    ...(env ? { env } : {}),
+    spawn(_executable, _args, options) {
+      onSpawn(options);
       const child = new EventEmitter();
       child.pid = 45678;
       queueMicrotask(() => child.emit("spawn"));
@@ -76,6 +79,39 @@ test("awaiting-start resumes only the exact Compose command and persistent mappi
   assert.equal(result.token, f.handed.token);
   assert.equal(readReservation(f.root).reservation.awaitingStart, false);
   assert.equal(readReservation(f.root).reservation.workId, "target");
+});
+
+test("awaiting-start accepts stateless Compose services without a volumes field", async (t) => {
+  const f = await fixture(t);
+  const result = await startLocalExecution(f.root, startInput(f), deps(f, { volumeFreeService: true }));
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(readReservation(f.root).reservation.awaitingStart, false);
+});
+
+test("handoff launches Compose with the verified engine and inherited runtime environment", async (t) => {
+  const f = await fixture(t);
+  let launchEnvironment;
+  const hostEnvironment = {
+    PATH: "/opt/local/bin:/usr/bin",
+    HOME: "/tmp/operator-home",
+    APP_MODE: "staging",
+    DOCKER_CONTEXT: "remote-context",
+    DOCKER_HOST: "tcp://remote.invalid:2375",
+    DOCKER_TLS_VERIFY: "1",
+    BUILDX_BUILDER: "remote-builder",
+  };
+  const result = await startLocalExecution(f.root, startInput(f), deps(f, {
+    env: hostEnvironment,
+    onSpawn(options) { launchEnvironment = options.env; },
+  }));
+  assert.equal(result.ok, true, result.reason);
+  assert.equal(launchEnvironment.PATH, hostEnvironment.PATH);
+  assert.equal(launchEnvironment.HOME, hostEnvironment.HOME);
+  assert.equal(launchEnvironment.APP_MODE, hostEnvironment.APP_MODE);
+  assert.equal(launchEnvironment.DOCKER_HOST, fixtureBinding.endpoint);
+  assert.equal(launchEnvironment.DOCKER_CONTEXT, undefined);
+  assert.equal(launchEnvironment.DOCKER_TLS_VERIFY, undefined);
+  assert.equal(launchEnvironment.BUILDX_BUILDER, undefined);
 });
 
 test("awaiting-start refuses changed persistent mounts before launching anything", async (t) => {

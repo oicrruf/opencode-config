@@ -13,6 +13,24 @@ import { releaseProjectReservation, transferApplicationReservation } from "./rel
 
 const blocked = (reason, detail = {}) => ({ ok: false, blocked: true, reason, ...detail });
 
+function releaseOnlyExecution(cwd, transition, source) {
+  if (typeof transition.previousExecutionId !== "string" || typeof transition.previousGeneration !== "string") {
+    return blocked("the release transition has no verified previous execution identity");
+  }
+  const previous = readExecutionRecord(cwd, transition.previousExecutionId);
+  if (!previous.ok || previous.record.executionId !== transition.previousExecutionId ||
+      previous.record.generation !== transition.previousGeneration || previous.record.workId !== transition.workId ||
+      previous.record.projectID !== source.projectID ||
+      !["running", "cleanup-pending", "closed"].includes(previous.record.phase)) {
+    return blocked("the release transition does not match one previous execution in this project");
+  }
+  const project = resolveRepositoryRoot(previous.record.source?.checkout ?? "");
+  if (!project.ok || canonicalPath(project.root) !== canonicalPath(source.projectRoot)) {
+    return blocked("the previous release execution is outside the active project");
+  }
+  return { ok: true, record: previous.record };
+}
+
 /** Tool callers supply only configuration. Identity comes from the adapter. */
 export async function executeSandboxOperation(operation, input, context, deps = {}) {
   const argumentsValid = validateSandboxOperation(operation, input);
@@ -126,8 +144,20 @@ export async function recoverSandboxTransition(context, deps = {}) {
     if (transition.workId !== source.workId) return blocked("the transition belongs to another work");
     const current = readReservation(cwd);
     if (!current.ok) return blocked("the current reservation is unverifiable");
+    const hasSuccessorId = typeof transition.successorExecutionId === "string";
+    const hasSuccessorGeneration = typeof transition.successorGeneration === "string";
+    if (hasSuccessorId !== hasSuccessorGeneration) return blocked("the transition successor identity is incomplete");
+    const releaseOnly = !hasSuccessorId;
     if (current.state === "free") {
       if (transition.phase === "recovered") return { ok: true, recovered: true, alreadyClosed: true };
+      if (releaseOnly) {
+        const previous = releaseOnlyExecution(cwd, transition, source);
+        if (!previous.ok || previous.record.phase !== "closed") return blocked("a free reservation does not prove the release execution is closed");
+        const absent = cleanupExecution(cwd, transition.previousExecutionId, deps);
+        if (!absent.ok) return absent;
+        const saved = writeTransition(cwd, { ...transition, phase: "recovered" });
+        return saved.ok ? { ...saved, recovered: true, quotaReleased: true, reportPath: previous.record.reportPath } : saved;
+      }
       const record = readExecutionRecord(cwd, transition.successorExecutionId);
       if (!record.ok || record.record.phase !== "closed" || record.record.generation !== transition.successorGeneration) {
         return blocked("a free reservation alone does not prove the transition closed");
@@ -147,6 +177,21 @@ export async function recoverSandboxTransition(context, deps = {}) {
     }
     const closed = closeTransitionExecution(cwd, held.executionId, deps);
     if (!closed.ok) return closed;
+    if (releaseOnly) {
+      const previous = releaseOnlyExecution(cwd, transition, source);
+      if (!previous.ok || previous.record.phase !== "closed") return blocked("the release execution closure could not be verified");
+      const confirmed = readReservation(cwd);
+      if (!confirmed.ok || confirmed.reservation?.executionId !== held.executionId || confirmed.reservation?.generation !== held.generation) {
+        return blocked("the reservation changed before release transition recovery");
+      }
+      const path = recordPath(cwd);
+      if (!path.ok) return path;
+      try { unlinkSync(path.path); }
+      catch { return blocked("the closed release transition reservation could not be released"); }
+      const saved = writeTransition(cwd, { ...transition, phase: "recovered" });
+      if (!saved.ok) return { ...saved, quotaReleased: true, reportPath: closed.reportPath };
+      return { ok: true, recovered: true, closed: true, quotaReleased: true, reportPath: closed.reportPath };
+    }
     if (held.executionId === transition.previousExecutionId) {
       // An interruption may occur after writing the provisional successor
       // but before reservation rotation. Close that unused state as well.
