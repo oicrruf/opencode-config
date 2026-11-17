@@ -493,6 +493,9 @@ function runSandboxSurfaceChecks() {
           fail(file, `agent.${agent}: the sandbox control grants '${family}', expected 'allow'`);
         }
       }
+      for (const operation of ['sandbox_release', 'sandbox_transfer']) {
+        if (perms[operation] !== 'ask') fail(file, `agent.${agent}: '${operation}' must require an explicit approval ('ask')`);
+      }
     }
     for (const agent of DENIED) {
       const perms = cfg.agent?.[agent]?.permission || {};

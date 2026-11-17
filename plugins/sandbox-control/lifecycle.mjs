@@ -1,3 +1,4 @@
+import { withSandboxOperation, ownsSandboxOperation, readTransition } from "./operation.mjs";
 // The lifecycle of a sandbox execution.
 //
 // The flow is: start, status, finish, cancel, recover. The start
@@ -14,11 +15,11 @@
 // without an engine.
 
 import { randomUUID, createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync, unlinkSync, rmdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync, unlinkSync, rmdirSync, renameSync } from "node:fs";
 import { join, relative, resolve, sep, isAbsolute } from "node:path";
 import { acquireReservation, releaseReservation, verifyOwner, readReservation } from "./reservation.mjs";
 import { takeCapture, prepareIndependentRepository } from "./sandbox-capture.mjs";
-import { readSandboxConfig, checkDependencies } from "./sandbox-config.mjs";
+import { readSandboxConfig, checkDependencies, verifyConfigurationSnapshot, configurationEvidence } from "./sandbox-config.mjs";
 import {
   buildBuildArguments,
   buildRunArguments,
@@ -82,7 +83,7 @@ export function executionDir(cwd, executionId) {
  * The file is written with restrictive permissions and is removed when
  * the execution closes.
  */
-export function writeSecretFile(cwd, executionId, secrets = []) {
+function writeSecretFileImpl(cwd, executionId, secrets = []) {
   if (!Array.isArray(secrets) || secrets.length === 0) {
     return { ok: true, path: null, names: [] };
   }
@@ -116,12 +117,14 @@ export function writeSecretFile(cwd, executionId, secrets = []) {
  * approves the product, and it never claims equivalence with
  * production.
  */
-export async function startSandbox(input, deps = {}) {
+async function startSandboxImpl(input, deps = {}) {
   const {
     workId,
     workName,
     worktreePath,
     sessionId = "",
+    projectID = null,
+    configPath = null,
     maxDurationSeconds = null,
     cwd = process.cwd(),
   } = input ?? {};
@@ -132,17 +135,20 @@ export async function startSandbox(input, deps = {}) {
     return { ok: false, reason: "the maximum duration must be a positive finite number of seconds" };
   }
 
+  const projectRoot = deps.projectRoot ?? worktreePath;
+  const config = readSandboxConfig(projectRoot, configPath);
+  if (!config.ok) {
+    return { ok: false, blocked: true, reason: config.reason, missing: config.missing };
+  }
+  if (deps.expectedConfigurationFingerprint && config.config.fingerprint !== deps.expectedConfigurationFingerprint) {
+    return { ok: false, blocked: true, reason: "the replacement configuration changed after validation" };
+  }
+
   const engine = inspectLocalEngine(deps);
   if (!engine.ok) return engine;
   let run;
   try { run = boundDocker(engine.binding, deps); }
   catch (error) { return { ok: false, blocked: true, reason: error.message }; }
-
-  const projectRoot = deps.projectRoot ?? worktreePath;
-  const config = readSandboxConfig(projectRoot);
-  if (!config.ok) {
-    return { ok: false, blocked: true, reason: config.reason, missing: config.missing };
-  }
 
   // The declared dependencies are checked before the quota is taken and
   // before any resource is created. A missing dependency blocks the
@@ -160,11 +166,11 @@ export async function startSandbox(input, deps = {}) {
 
   // The quota is one per project and covers both the application and
   // the sandbox, so the reservation is taken before anything is built.
-  const identity = buildExecutionIdentity(workId, workName);
+  const identity = deps.preparedExecution?.identity ?? buildExecutionIdentity(workId, workName);
   const deadlineAt = maxDurationSeconds
     ? new Date(Date.now() + maxDurationSeconds * 1000).toISOString()
     : null;
-  const acquired = acquireReservation(cwd, {
+  const acquired = deps.preparedExecution?.reservation ?? acquireReservation(cwd, {
     workId,
     workName,
     scope: "sandbox",
@@ -177,12 +183,20 @@ export async function startSandbox(input, deps = {}) {
   if (!acquired.ok) {
     return { ok: false, blocked: true, reason: acquired.reason, heldBy: acquired.heldBy };
   }
+  if (deps.preparedExecution && !verifyOwner(cwd, acquired.token, { executionId: identity.executionId, generation: acquired.reservation.generation }).ok) {
+    return { ok: false, blocked: true, reason: "the prepared successor does not own the current reservation" };
+  }
 
   const record = {
     ...identity,
     engine: engine.binding,
+    schemaVersion: 2,
+    generation: acquired.reservation.generation,
     sessionId,
+    projectID,
     startedAt: new Date().toISOString(),
+    source: { checkout: resolve(worktreePath) },
+    configuration: configurationEvidence(config.config),
     phase: "preparing",
     result: null,
     capture: null,
@@ -211,6 +225,8 @@ export async function startSandbox(input, deps = {}) {
     executionId: identity.executionId,
     cwd,
     include: config.config.include,
+    protectedPaths: [config.config.relativePath],
+    onBeforeCompare: deps.onBeforeCaptureCompare,
   });
   if (!capture.ok) {
     return failBeforeResources(capture.reason, "capture", capture.refused, capture.refusals);
@@ -219,6 +235,9 @@ export async function startSandbox(input, deps = {}) {
     destination: capture.destination,
     manifest: capture.manifest,
   };
+
+  const configurationStable = verifyConfigurationSnapshot(projectRoot, config.config);
+  if (!configurationStable.ok) return failBeforeResources(configurationStable.reason, "configuration");
 
   const secrets = writeSecretFile(cwd, identity.executionId, config.config.testSecrets);
   if (!secrets.ok) {
@@ -310,7 +329,7 @@ export async function startSandbox(input, deps = {}) {
       ok: false, phase, reason: evidence.reason, quotaReleased: false, resourcesKept: true,
       executionId: identity.executionId, token: acquired.token,
     };
-    const cleanup = cleanupExecution(cwd, identity.executionId, deps);
+    const cleanup = cleanupExecution(cwd, identity.executionId, { ...deps, preserveExecutionRecord: true });
     let quotaReleased = false;
     if (cleanup.ok) {
       const released = releaseReservation(cwd, acquired.token, { resourcesAbsent: true });
@@ -463,15 +482,20 @@ export function sandboxStatus(cwd, executionId) {
 /**
  * Write the execution's record.
  */
-export function writeExecutionRecord(cwd, record) {
+function writeExecutionRecordImpl(cwd, record) {
   const dir = executionDir(cwd, record.executionId);
   if (!dir.ok) return { ok: false, reason: dir.reason };
   const ensured = ensureDir(dir.dir);
   if (!ensured.ok) return { ok: false, reason: ensured.reason };
+  const temporary = join(dir.dir, `${RECORD_FILE}.${randomUUID()}.tmp`);
   try {
-    writeFileSync(join(dir.dir, RECORD_FILE), `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+    const safe = verifyManagedPath(cwd, [".opencode", "state", "sandbox", "executions", record.executionId, RECORD_FILE]);
+    if (!safe.ok) return safe;
+    writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(temporary, join(dir.dir, RECORD_FILE));
     return { ok: true, path: join(dir.dir, RECORD_FILE) };
   } catch (err) {
+    try { unlinkSync(temporary); } catch { /* the prior canonical record remains intact */ }
     return { ok: false, reason: `the execution record could not be written: ${err.message}` };
   }
 }
@@ -541,7 +565,7 @@ export function discoverImplicitVolumes(cwd, executionId, run) {
  * removed. A failure to write the report keeps the resources, because
  * the evidence must be recoverable.
  */
-export function finishSandbox(cwd, executionId, input, deps = {}) {
+function finishSandboxImpl(cwd, executionId, input, deps = {}) {
   const { result, steps = [], differencesFromProduction = [], token = null } = input ?? {};
 
   if (!RESULT_STATES.includes(result)) {
@@ -565,7 +589,7 @@ export function finishSandbox(cwd, executionId, input, deps = {}) {
         reason: "closing an execution requires the token that owns its reservation",
       };
     }
-    const verified = verifyOwner(cwd, token);
+    const verified = verifyOwner(cwd, token, { executionId, ...(record.record.generation ? { generation: record.record.generation } : {}) });
     if (!verified.ok) return { ok: false, reason: verified.reason };
   }
 
@@ -587,14 +611,23 @@ export function finishSandbox(cwd, executionId, input, deps = {}) {
     };
   }
 
-  const cleanup = cleanupExecution(cwd, executionId, deps);
+  const cleanup = cleanupExecution(cwd, executionId, { ...deps, preserveExecutionRecord: true });
+  record.record.result = result;
+  record.record.phase = cleanup.ok ? "closed" : "cleanup-pending";
+  record.record.reportPath = written.path;
+  const terminal = writeExecutionRecord(cwd, record.record);
+  if (!terminal.ok) return { ...terminal, quotaReleased: false, reportPath: written.path };
 
   // The quota is released only after the evidence is preserved and the
   // absence of the resources is verified. A cleanup that could not
   // complete keeps the block.
   let quotaReleased = false;
-  if (cleanup.ok && token) {
-    disarmSupervisor(cwd);
+  if (cleanup.ok && token && record.record.tokenRequired !== false) {
+    const disarmed = disarmSupervisor(cwd, executionId);
+    if (!disarmed.ok) {
+      writeExecutionRecord(cwd, { ...record.record, phase: "cleanup-pending" });
+      return { ...disarmed, quotaReleased: false };
+    }
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {
@@ -613,10 +646,6 @@ export function finishSandbox(cwd, executionId, input, deps = {}) {
     }
   }
 
-  record.record.result = result;
-  record.record.phase = cleanup.ok ? "closed" : "cleanup-pending";
-  record.record.reportPath = written.path;
-  writeExecutionRecord(cwd, record.record);
 
   return {
     ok: true,
@@ -667,6 +696,8 @@ export function buildReport(record, input) {
       executionId: record.executionId,
       workId: record.workId,
       workName: record.workName,
+      source: record.source ?? null,
+      configuration: record.configuration ?? null,
       startedAt: record.startedAt,
       concludedAt: new Date().toISOString(),
       capture: {
@@ -728,7 +759,7 @@ export function writeReport(cwd, executionId, report) {
  * cancellation was dispatched is tolerated: the dispatches are
  * invalidated and the late response is reconciled.
  */
-export function cleanupExecution(cwd, executionId, deps = {}) {
+function cleanupExecutionImpl(cwd, executionId, deps = {}) {
   const record = readExecutionRecord(cwd, executionId);
   if (!record.ok) return { ok: false, reason: record.reason };
 
@@ -823,8 +854,9 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
   const captureRoot = captureRootDir(cwd);
   const expectedCapture = captureRoot.ok ? join(captureRoot.dir, executionId) : null;
   const recordedCapture = record.record.capture?.destination;
+  const noCapturePrepared = record.record.capture === null && ["preparing", "closed", "cancelled", "failed"].includes(record.record.phase) && !existsSync(expectedCapture);
   const verifiedCapture = verifyManagedPath(cwd, [".opencode", "state", "sandbox", "captures", executionId]);
-  if (!captureRoot.ok || !verifiedCapture.ok || resolve(verifiedCapture.path) !== resolve(expectedCapture) || typeof recordedCapture !== "string" || resolve(recordedCapture) !== resolve(expectedCapture)) {
+  if (!captureRoot.ok || !verifiedCapture.ok || resolve(verifiedCapture.path) !== resolve(expectedCapture) || (!noCapturePrepared && (typeof recordedCapture !== "string" || resolve(recordedCapture) !== resolve(expectedCapture)))) {
     remaining.push({ kind: "capture", reason: verifiedCapture.reason ?? "the recorded capture path is not the execution's verified capture path" });
   } else {
     try {
@@ -846,8 +878,21 @@ export function cleanupExecution(cwd, executionId, deps = {}) {
     const verified = verifyManagedPath(cwd, [".opencode", "state", "sandbox", "executions", executionId]);
     try {
       if (!verified.ok || resolve(verified.path) !== resolve(dir.dir)) throw new Error(verified.reason ?? "the execution path does not match the managed root");
-      removeManagedTree(cwd, [".opencode", "state", "sandbox", "executions", executionId]);
-      if (existsSync(dir.dir)) throw new Error("the execution directory still exists after removal");
+      if (deps.preserveExecutionRecord === true) {
+        for (const name of readdirSync(dir.dir)) {
+          if (name === RECORD_FILE) continue;
+          // Only the known per-execution secret file and interrupted atomic
+          // record writes belong to this control; unknown state is a block.
+          if (name !== "test-secrets.env" && !new RegExp(`^${RECORD_FILE.replaceAll(".", "\\.")}\\.[a-f0-9-]+\\.tmp$`).test(name)) throw new Error("unrecognized execution state");
+          const path = join(dir.dir, name);
+          if (!lstatSync(path).isFile() || lstatSync(path).isSymbolicLink()) throw new Error("unsafe execution secret/state path");
+          unlinkSync(path);
+          if (existsSync(path)) throw new Error("execution secret/state remains");
+        }
+      } else {
+        removeManagedTree(cwd, [".opencode", "state", "sandbox", "executions", executionId]);
+        if (existsSync(dir.dir)) throw new Error("the execution directory still exists after removal");
+      }
     } catch (error) {
       remaining.push({ kind: "execution", reason: `the execution directory could not be removed and verified: ${error.message}` });
     }
@@ -925,7 +970,7 @@ function preserveClosure(cwd, record, reason) {
  * The quota is kept until the resources are accounted for, so a
  * cancellation that cannot remove everything leaves the block in place.
  */
-export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
+function cancelSandboxImpl(cwd, executionId, input = {}, deps = {}) {
   const { token = null, reason = "cancelled" } = input ?? {};
 
   const record = readExecutionRecord(cwd, executionId);
@@ -940,13 +985,13 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
         reason: "cancelling an execution requires the token that owns its reservation",
       };
     }
-    const verified = verifyOwner(cwd, token);
+    const verified = verifyOwner(cwd, token, { executionId, ...(record.record.generation ? { generation: record.record.generation } : {}) });
     if (!verified.ok) return { ok: false, reason: verified.reason };
   }
 
   const evidence = preserveClosure(cwd, record.record, "execution cancelled");
   if (!evidence.ok) return { ...evidence, quotaReleased: false };
-  const cleanup = cleanupExecution(cwd, executionId, deps);
+  const cleanup = cleanupExecution(cwd, executionId, { ...deps, preserveExecutionRecord: true });
   if (!cleanup.ok) {
     record.record.phase = "cleanup-pending";
     record.record.cancelReason = reason;
@@ -961,9 +1006,19 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
 
   // The quota is released only after the absence of the resources is
   // verified.
+  record.record.phase = "cancelled";
+  record.record.result = record.record.result ?? "not executed";
+  record.record.cancelReason = reason;
+  const terminal = writeExecutionRecord(cwd, record.record);
+  if (!terminal.ok) return { ...terminal, quotaReleased: false };
+
   let quotaReleased = false;
-  if (token) {
-    disarmSupervisor(cwd);
+  if (token && record.record.tokenRequired !== false) {
+    const disarmed = disarmSupervisor(cwd, executionId);
+    if (!disarmed.ok) {
+      writeExecutionRecord(cwd, { ...record.record, phase: "cleanup-pending" });
+      return { ...disarmed, quotaReleased: false };
+    }
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {
@@ -980,10 +1035,6 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
     }
   }
 
-  record.record.phase = "cancelled";
-  record.record.result = record.record.result ?? "not executed";
-  record.record.cancelReason = reason;
-  writeExecutionRecord(cwd, record.record);
 
   return { ok: true, cancelled: true, quotaReleased, removed: cleanup.removed };
 }
@@ -1000,7 +1051,7 @@ export function cancelSandbox(cwd, executionId, input = {}, deps = {}) {
  * whose reservation was already released — the closed case — needs no
  * token, because nothing is destroyed.
  */
-export function recoverSandbox(cwd, executionId, deps = {}) {
+function recoverSandboxImpl(cwd, executionId, deps = {}) {
   const token = deps.token ?? null;
   const record = readExecutionRecord(cwd, executionId);
   if (!record.ok) {
@@ -1013,7 +1064,11 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
   }
 
   if (record.record.result !== null && record.record.phase === "closed") {
-    return { ok: true, alreadyClosed: true, reason: "the closure was already completed" };
+    const current = readReservation(cwd);
+    if (!current.ok) return { ok: false, blocked: true, reason: current.reason, quotaReleased: false };
+    if (current.state === "free" || current.reservation.executionId !== executionId) {
+      return { ok: true, alreadyClosed: true, reason: "the closure was already completed" };
+    }
   }
 
   // The recovery destroys the environment, so the token that owns the
@@ -1026,7 +1081,7 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
         quotaReleased: false,
       };
     }
-    const verified = verifyOwner(cwd, token);
+    const verified = verifyOwner(cwd, token, { executionId, ...(record.record.generation ? { generation: record.record.generation } : {}) });
     if (!verified.ok) {
       return { ok: false, reason: verified.reason, quotaReleased: false };
     }
@@ -1034,7 +1089,7 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
 
   const evidence = preserveClosure(cwd, record.record, "interrupted execution recovery");
   if (!evidence.ok) return { ...evidence, quotaReleased: false };
-  const cleanup = cleanupExecution(cwd, executionId, deps);
+  const cleanup = cleanupExecution(cwd, executionId, { ...deps, preserveExecutionRecord: true });
   if (!cleanup.ok) {
     record.record.phase = "cleanup-pending";
     writeExecutionRecord(cwd, record.record);
@@ -1048,9 +1103,18 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
 
   // The quota is released only after the absence of the resources is
   // verified.
+  record.record.phase = "closed";
+  record.record.result = record.record.result ?? "not executed";
+  const terminal = writeExecutionRecord(cwd, record.record);
+  if (!terminal.ok) return { ...terminal, quotaReleased: false };
+
   let quotaReleased = false;
-  if (token) {
-    disarmSupervisor(cwd);
+  if (token && record.record.tokenRequired !== false) {
+    const disarmed = disarmSupervisor(cwd, executionId);
+    if (!disarmed.ok) {
+      writeExecutionRecord(cwd, { ...record.record, phase: "cleanup-pending" });
+      return { ...disarmed, quotaReleased: false };
+    }
     const released = releaseReservation(cwd, token, { resourcesAbsent: true });
     quotaReleased = released.ok;
     if (!released.ok) {
@@ -1065,9 +1129,6 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
     }
   }
 
-  record.record.phase = "closed";
-  record.record.result = record.record.result ?? "not executed";
-  writeExecutionRecord(cwd, record.record);
 
   return { ok: true, alreadyClosed: false, closed: true, quotaReleased };
 }
@@ -1079,7 +1140,7 @@ export function recoverSandbox(cwd, executionId, deps = {}) {
  * reservation until the evidence is preserved and the cleanup is
  * verified.
  */
-export function closeExpiredExecution(cwd, executionId, deps = {}) {
+function closeExpiredExecutionImpl(cwd, executionId, deps = {}) {
   const record = readExecutionRecord(cwd, executionId);
   if (!record.ok) return { ok: false, reason: record.reason };
   if (!record.record.deadlineAt) {
@@ -1098,3 +1159,63 @@ export function closeExpiredExecution(cwd, executionId, deps = {}) {
 }
 
 export { readReservation, releaseReservation, prepareIndependentRepository, labelArguments, mkdirSync };
+
+/** Close resources for a journaled replacement without releasing its slot.
+ * This is not a tool: ordinary callers still need the owner token. */
+export function closeTransitionExecution(cwd, executionId, deps = {}) {
+  if (!ownsSandboxOperation(cwd)) return { ok: false, blocked: true, reason: "transition closure needs exclusive operation ownership" };
+  const journal = readTransition(cwd);
+  const current = readReservation(cwd);
+  const execution = readExecutionRecord(cwd, executionId);
+  const transition = journal.transition;
+  const generation = transition?.previousExecutionId === executionId ? transition.previousGeneration :
+    transition?.successorExecutionId === executionId ? transition.successorGeneration : null;
+  if (!journal.ok || !transition || !generation || !current.ok || !execution.ok || current.state !== "held" ||
+      current.reservation.scope !== "sandbox" || current.reservation.executionId !== executionId ||
+      current.reservation.generation !== generation || execution.record.generation !== generation ||
+      current.reservation.workId !== transition.workId || execution.record.workId !== transition.workId) {
+    return { ok: false, blocked: true, reason: "the transition, reservation and execution identity do not match" };
+  }
+  const evidence = preserveClosure(cwd, execution.record, "explicit sandbox replacement or transition recovery");
+  if (!evidence.ok) return { ...evidence, quotaReleased: false };
+  const cleanup = cleanupExecution(cwd, executionId, { ...deps, preserveExecutionRecord: true });
+  if (!cleanup.ok) return { ...cleanup, quotaReleased: false };
+  const supervisor = disarmSupervisor(cwd, executionId);
+  if (!supervisor.ok) return { ...supervisor, quotaReleased: false };
+  const saved = writeExecutionRecord(cwd, { ...execution.record, phase: "closed", result: execution.record.result ?? "not executed", reportPath: evidence.path ?? execution.record.reportPath });
+  if (!saved.ok) return { ...saved, quotaReleased: false };
+  return { ok: true, closed: true, quotaReleased: false, reportPath: evidence.path ?? execution.record.reportPath };
+}
+
+// All mutating entrypoints share the same cross-process operation boundary.
+export function startSandbox(...args) {
+  return withSandboxOperation(args[0]?.cwd ?? process.cwd(), "startSandbox", () => startSandboxImpl(...args));
+}
+
+export function finishSandbox(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "finishSandbox", () => finishSandboxImpl(...args));
+}
+
+export function cancelSandbox(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "cancelSandbox", () => cancelSandboxImpl(...args));
+}
+
+export function recoverSandbox(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "recoverSandbox", () => recoverSandboxImpl(...args));
+}
+
+export function closeExpiredExecution(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "closeExpiredExecution", () => closeExpiredExecutionImpl(...args));
+}
+
+export function cleanupExecution(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "cleanupExecution", () => cleanupExecutionImpl(...args));
+}
+
+export function writeExecutionRecord(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "writeExecutionRecord", () => writeExecutionRecordImpl(...args));
+}
+
+export function writeSecretFile(...args) {
+  return withSandboxOperation(args[0] ?? process.cwd(), "writeSecretFile", () => writeSecretFileImpl(...args));
+}

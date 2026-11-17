@@ -83,6 +83,8 @@
         "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow",
         "worktree_*": "allow"
       },
@@ -107,6 +109,8 @@
         "composio_*": "ask",
         "playwright_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow"
       },
       "model": "openai/gpt-6.1-sol"
@@ -120,6 +124,8 @@
         "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow"
       },
       "model": "openai/gpt-6.1-sol"
@@ -285,6 +291,6 @@
       "enabled": true
     }
   },
-  "model": "openai/gpt-5.6-terra",
+  "model": "openai/gpt-6.1-sol",
   "small_model": "openai/gpt-5.6-luna"
 }

@@ -25,6 +25,8 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 
 const {
   startSandbox,
@@ -41,6 +43,37 @@ const {
 } = await import("../lifecycle.mjs");
 const { readReservation } = await import("../reservation.mjs");
 const { readSupervisor } = await import("../execution.mjs");
+
+for (const operation of ["finish", "cancel", "recover"]) {
+  test(`${operation} keeps its record and quota when terminal persistence fails`, async () => {
+    await withRepo(async (dir) => {
+      prepareProject(dir);
+      const deps = dockerStub();
+      const started = await startSandbox({ cwd: dir, worktreePath: dir, workId: "terminal-write" }, deps);
+      assert.equal(started.ok, true, started.reason);
+      const original = fs.writeFileSync;
+      let result;
+      try {
+        fs.writeFileSync = function(path, data, options) {
+          if (String(path).includes("execution.json.") && typeof data === "string" && ["closed", "cancelled"].includes(JSON.parse(data).phase)) throw Error("injected terminal persistence failure");
+          return original(path, data, options);
+        };
+        syncBuiltinESMExports();
+        const id = started.execution.executionId;
+        result = operation === "finish" ? finishSandbox(dir, id, { token: started.token, result: "passed" }, deps) :
+          operation === "cancel" ? cancelSandbox(dir, id, { token: started.token }, deps) : recoverSandbox(dir, id, { ...deps, token: started.token });
+      } finally { fs.writeFileSync = original; syncBuiltinESMExports(); }
+      assert.equal(result.ok, false);
+      assert.equal(result.quotaReleased, false);
+      assert.equal(readExecutionRecord(dir, started.execution.executionId).ok, true);
+      assert.equal(readReservation(dir).state, "held");
+      const recovered = recoverSandbox(dir, started.execution.executionId, { ...deps, token: started.token });
+      assert.equal(recovered.ok, true, recovered.reason);
+      assert.equal(recovered.quotaReleased, true);
+      assert.equal(readReservation(dir).state, "free");
+    });
+  });
+}
 
 function withRepo(run) {
   const dir = mkdtempSync(join(tmpdir(), "sandbox-lifecycle-"));

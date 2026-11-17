@@ -71,6 +71,8 @@
         "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow",
         "worktree_*": "allow"
       }
@@ -93,6 +95,8 @@
         "composio_*": "ask",
         "playwright_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow"
       }
     },
@@ -105,6 +109,8 @@
         "composio_*": "ask",
         "context7_*": "allow",
         "sandbox_*": "allow",
+        "sandbox_release": "ask",
+        "sandbox_transfer": "ask",
         "reservation_*": "allow"
       }
     },

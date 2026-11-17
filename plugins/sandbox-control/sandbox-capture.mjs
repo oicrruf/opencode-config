@@ -60,8 +60,9 @@ export const DEFAULT_EXCLUSIONS = [
  * Protected exclusions are checked first and cannot be overridden by
  * declared include paths. Includes only document additional project paths.
  */
-export function isExcluded(relPath, include = []) {
+export function isExcluded(relPath, include = [], protectedPaths = []) {
   const rel = relPath.split(sep).join("/");
+  if (protectedPaths.includes(rel)) return { excluded: true, kind: "sandbox-configuration" };
   for (const rule of DEFAULT_EXCLUSIONS) {
     if (rule.matches(rel)) return { excluded: true, kind: rule.kind };
   }
@@ -117,10 +118,15 @@ export function readWorktreeIdentity(worktreePath) {
  * untracked file is captured and a deleted file is reported as a
  * deletion rather than silently missing.
  */
-export function listCaptureCandidates(worktreePath, include = []) {
+export function listCaptureCandidates(worktreePath, include = [], protectedPaths = []) {
   const root = resolve(worktreePath);
   const files = [];
   const deletions = [];
+  // A hardlink alias of the selected config is the same secret-bearing file.
+  const protectedIdentities = new Set(protectedPaths.map((rel) => {
+    const stat = lstatSync(join(root, rel));
+    return `${stat.dev}:${stat.ino}`;
+  }));
 
   const walk = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -128,7 +134,7 @@ export function listCaptureCandidates(worktreePath, include = []) {
       const rel = relative(root, full).split(sep).join("/");
       if (!rel || rel === ".") continue;
 
-      const decision = isExcluded(rel, include);
+      const decision = isExcluded(rel, include, protectedPaths);
       if (decision.excluded) continue;
 
       if (entry.isSymbolicLink()) {
@@ -140,7 +146,9 @@ export function listCaptureCandidates(worktreePath, include = []) {
         continue;
       }
       if (entry.isFile()) {
-        files.push({ rel, kind: "file", mode: statSync(full).mode & 0o777 });
+        const stat = statSync(full);
+        if (protectedIdentities.has(`${stat.dev}:${stat.ino}`)) continue;
+        files.push({ rel, kind: "file", mode: stat.mode & 0o777 });
         continue;
       }
       // A socket, a fifo, or a device has no place in a build context.
@@ -166,6 +174,7 @@ export function takeCapture(input) {
     workName,
     executionId,
     include = [],
+    protectedPaths = [],
     cwd = process.cwd(),
   } = input ?? {};
 
@@ -173,6 +182,9 @@ export function takeCapture(input) {
   if (!workId) return { ok: false, reason: "the capture needs a work identifier" };
 
   const root = resolve(worktreePath);
+  if (!Array.isArray(protectedPaths) || protectedPaths.some((path) => typeof path !== "string" || !path || !isInside(root, resolve(root, path)) || path !== relative(root, resolve(root, path)).split(sep).join("/"))) {
+    return { ok: false, reason: "the protected configuration path is outside the capture source" };
+  }
   const destinationRoot = captureRootDir(cwd);
   if (!destinationRoot.ok) return { ok: false, reason: destinationRoot.reason };
   const ensured = ensureDir(destinationRoot.dir);
@@ -184,7 +196,9 @@ export function takeCapture(input) {
   }
 
   const before = readWorktreeIdentity(root);
-  const { files, deletions } = listCaptureCandidates(root, include);
+  let files, deletions;
+  try { ({ files, deletions } = listCaptureCandidates(root, include, protectedPaths)); }
+  catch { return { ok: false, reason: "the protected configuration identity could not be verified" }; }
 
   // The inventory of the source is taken before the copy and compared
   // after it. A comparison of the branch and the head alone is not
@@ -219,7 +233,7 @@ export function takeCapture(input) {
       const linkTarget = resolve(dirname(source), file.target);
       try {
         const targetRel = relative(root, linkTarget).split(sep).join("/");
-        const targetDecision = isExcluded(targetRel, include);
+        const targetDecision = isExcluded(targetRel, include, protectedPaths);
         if (targetDecision.excluded) {
           throw new Error(`the symbolic link ${file.rel} points to an excluded path`);
         }

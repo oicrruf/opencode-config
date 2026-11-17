@@ -28,6 +28,7 @@ import {
   verifyRetirementIdentity,
 } from "./removal.mjs";
 import { listWorktrees } from "./creation.mjs";
+import { withSandboxOperation } from "../sandbox-control/operation.mjs";
 
 /**
  * Retire a worktree.
@@ -83,6 +84,9 @@ export async function retireWorktree(input, deps = {}) {
     };
   }
 
+  let operationEntered = false;
+  const guarded = await withSandboxOperation(project.root, "worktreeRetirement", async () => {
+  operationEntered = true;
   try {
     const { worktree, branch, head } = validated.request;
 
@@ -308,6 +312,9 @@ export async function retireWorktree(input, deps = {}) {
   } finally {
     releaseLock(project.root, { ownerPid: locked.lock.ownerPid });
   }
+  });
+  if (!operationEntered) releaseLock(project.root, { ownerPid: locked.lock.ownerPid });
+  return guarded;
 }
 
 function basenameOf(path) {

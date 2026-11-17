@@ -9,7 +9,7 @@
 // produces evidence, it never approves a product, and it never changes
 // the host's Git state.
 
-import { startSandbox, sandboxStatus, finishSandbox, cancelSandbox, recoverSandbox } from "./lifecycle.mjs";
+import { startSandbox, sandboxStatus, finishSandbox, cancelSandbox, recoverSandbox, readReservation } from "./lifecycle.mjs";
 import {
   startLocalExecution,
   stopLocalExecution,
@@ -21,10 +21,12 @@ import {
 } from "./execution.mjs";
 import { readSandboxConfig } from "./sandbox-config.mjs";
 import { inspectLocalEngine } from "./engine.mjs";
-import { registerV2Tools } from "../plugin-v2-adapter.mjs";
+import { registerV2Tools, adaptV2WorktreeApi } from "../plugin-v2-adapter.mjs";
+import { registerSandboxCommand, validateSandboxOperation } from "./command.mjs";
 import { listWorktrees } from "../worktree-control/creation.mjs";
 import { reconcileInventory } from "../worktree-control/inventory.mjs";
 import { resolveProjectRoot } from "../worktree-control/paths.mjs";
+import { executeSandboxOperation, recoverSandboxTransition } from "./transition.mjs";
 
 const SANDBOX_DESCRIPTION =
   "Build and test an independent capture of the work under test in an isolated local Docker container. " +
@@ -58,9 +60,34 @@ async function managedWorktreeApi(api, cwd) {
 /**
  * The tool surface of the sandbox control.
  */
-export const SandboxControlPlugin = async () => {
+export const SandboxControlPlugin = async (dependencies = {}) => {
   return {
     tool: {
+      ...Object.fromEntries(["release", "build", "rebuild", "transfer"].map((operation) => [`sandbox_${operation}`, {
+        description: `${operation} the sandbox of the verified active work and checkout. Replacement preserves external evidence and verifies closure while holding the project quota; it never approves a product.`,
+        args: operation === "release" ? {} : operation === "transfer"
+          ? { configPath: { type: "string", description: "literal destination Compose file for application handoff, or sandbox JSON path for sandbox replacement, relative to the effective checkout root", required: true } }
+          : { configPath: { type: "string", description: "literal configuration JSON path relative to the effective checkout root", required: true } },
+        async execute(args, context) {
+          const valid = validateSandboxOperation(operation, args ?? {});
+          if (!valid.ok) return valid;
+          if (typeof context?.permission?.assert !== "function") return { ok: false, blocked: true, reason: "the session permission API is unavailable" };
+          await context.permission.assert({ sessionID: context.sessionID, action: `sandbox_${operation}`, resources: ["*"] });
+          return executeSandboxOperation(operation, args, context, dependencies);
+        },
+      }])),
+
+      sandbox_recover_transition: {
+        description: "Explicitly reconcile an interrupted sandbox replacement and resume attributable closure only. Never starts another test or requests another session's token. A live operation owner blocks recovery.",
+        args: {},
+        async execute(args, context) {
+          if (!args || Object.keys(args).length) return { ok: false, reason: "transition recovery takes no caller-supplied identity or token" };
+          if (typeof context?.permission?.assert !== "function") return { ok: false, blocked: true, reason: "the session permission API is unavailable" };
+          await context.permission.assert({ sessionID: context.sessionID, action: "sandbox_recover_transition", resources: ["*"] });
+          return recoverSandboxTransition(context, dependencies);
+        },
+      },
+
       sandbox_start: {
         description: SANDBOX_DESCRIPTION,
         args: {
@@ -78,9 +105,11 @@ export const SandboxControlPlugin = async () => {
             workId: args?.workId,
             workName: args?.workName,
             worktreePath: args?.worktreePath,
+            sessionId: context?.sessionID ?? "",
+            projectID: context?.projectID ?? null,
             maxDurationSeconds: args?.maxDurationSeconds ?? null,
             cwd,
-          });
+          }, dependencies);
         },
       },
 
@@ -165,6 +194,8 @@ export const SandboxControlPlugin = async () => {
           executable: { type: "string", description: "the program to run, without a shell", required: true },
           args: { type: "array", description: "the arguments of the program" },
           cwd: { type: "string", description: "the directory the program runs in" },
+          token: { type: "string", description: "the rotated handoff token returned by sandbox_transfer; required only to resume an awaiting-start Compose application" },
+          composeFile: { type: "string", description: "the exact absolute Compose file returned by sandbox_transfer; required only to resume an awaiting-start application" },
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
@@ -176,6 +207,9 @@ export const SandboxControlPlugin = async () => {
             args: args?.args ?? [],
             cwd: args?.cwd,
             worktreeApi,
+            sessionId: context?.sessionID ?? "",
+            token: args?.token ?? null,
+            composeFile: args?.composeFile ?? null,
           });
         },
       },
@@ -246,8 +280,18 @@ export const SandboxControlPlugin = async () => {
         },
         async execute(args, context) {
           const cwd = context?.directory ?? currentWorktree();
-          if (args?.action === "disarm") return disarmSupervisor(cwd);
-          return readSupervisor(cwd);
+          if (!["inspect", "disarm"].includes(args?.action)) return { ok: false, reason: "supervisor action must be inspect or disarm" };
+          const supervisor = readSupervisor(cwd);
+          if (!supervisor.ok || (supervisor.supervisor && supervisor.supervisor.executionId !== args?.executionId)) {
+            return { ok: false, blocked: true, reason: "the supervisor identity is not verified for this execution" };
+          }
+          if (args.action === "inspect") return supervisor;
+          const current = readReservation(cwd);
+          if (!context?.sessionID || !current.ok || current.state !== "held" ||
+              current.reservation.executionId !== args.executionId || current.reservation.sessionId !== context.sessionID) {
+            return { ok: false, blocked: true, reason: "only the verified owning session may disarm this supervisor" };
+          }
+          return disarmSupervisor(cwd, args.executionId);
         },
       },
     },
@@ -257,7 +301,19 @@ export const SandboxControlPlugin = async () => {
 export default {
   id: "opencode-config.sandbox-control",
   async setup(ctx) {
-    return registerV2Tools(ctx, "opencode-config.sandbox-control", SandboxControlPlugin, { worktree: true });
+    const disposeTools = await registerV2Tools(ctx, "opencode-config.sandbox-control", SandboxControlPlugin, { worktree: true });
+    let command;
+    try {
+      command = await registerSandboxCommand(ctx, async (operation, input, sessionID) => {
+        const session = await ctx.session.get({ sessionID });
+        const directory = session?.location?.directory ?? session?.directory;
+        const projectID = session?.projectID ?? session?.location?.project?.id;
+        return executeSandboxOperation(operation, input, {
+          directory, projectID, sessionID, worktree: adaptV2WorktreeApi(ctx.worktree, projectID),
+        });
+      });
+    } catch (error) { await disposeTools(); throw error; }
+    return async () => { await command.dispose(); await disposeTools(); };
   },
 };
 

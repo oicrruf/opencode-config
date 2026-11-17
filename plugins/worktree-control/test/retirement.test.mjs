@@ -37,6 +37,7 @@ const {
   checkLocalChanges,
   checkUnpublishedCommits,
   checkProcessAccess,
+  checkContainerAccess,
   checkIgnoredFiles,
   checkPathSafety,
   runBlockingChecks,
@@ -44,6 +45,8 @@ const {
 const { preserveEvidence, isRecognizedEvidence, looksLikeCredential } = await import("../evidence.mjs");
 const { validateRetirementRequest, verifyRetirementIdentity, removeLocalBranch, refuseRemoteDeletion } = await import("../removal.mjs");
 const { retireWorktree, listRetirementCandidates } = await import("../lifecycle.mjs");
+const { withSandboxOperation } = await import("../../sandbox-control/operation.mjs");
+const { acquireLock, releaseLock } = await import("../lock.mjs");
 
 function withRepo(run) {
   const dir = mkdtempSync(join(tmpdir(), "worktree-retire-"));
@@ -279,6 +282,51 @@ test("an unavailable process check blocks the retirement", () => {
   assert.equal(check.available, false);
   assert.equal(check.blocked, true);
   assert.match(check.reason, /could not be inspected/);
+});
+
+test("a Docker Desktop bind mount blocks retirement and points to sandbox release", () => {
+  const directory = mkdtempSync(join(tmpdir(), "worktree-container-access-"));
+  const binding = { operatingSystem: "Docker Desktop", platform: "darwin" };
+  const result = checkContainerAccess(directory, {
+    inspectLocalEngine: () => ({ ok: true, binding }),
+    boundDocker: () => (_command, args) => args[0] === "ps" ? "a1b2c3d4e5f6" :
+      `running\t${JSON.stringify([{ Type: "bind", Source: `/host_mnt${directory}`, Destination: "/workspaces/app", RW: true }])}`,
+  });
+  try {
+    assert.equal(result.available, true);
+    assert.equal(result.blocked, true);
+    assert.match(result.reason, /sandbox release/);
+    assert.deepEqual(result.containers, [{ containerId: "a1b2c3d4e5f6", destinations: ["/workspaces/app"] }]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("an unavailable or unverifiable local engine blocks retirement", () => {
+  const result = checkContainerAccess("/tmp/wt", {
+    inspectLocalEngine: () => ({ ok: false, blocked: true, reason: "engine metadata could not be verified" }),
+    boundDocker: () => { throw new Error("must not inspect through an unverified engine"); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.available, false);
+  assert.equal(result.blocked, true);
+  assert.match(result.reason, /metadata could not be verified/);
+});
+
+test("worktree retirement serializes with sandbox operations and releases its lock on conflict", async () => {
+  await withRepo(async (root) => {
+    let unlock;
+    const held = withSandboxOperation(root, "fixture", () => new Promise((resolve) => { unlock = resolve; }));
+    try {
+      const result = await retireWorktree({
+        request: { worktree: join(root, "missing-worktree"), branch: "feature/x", base: "main", head: "abc", evidence: "verified" },
+        worktreeApi: worktreeApiStub({}), cwd: root, expectedRoot: root,
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.reason, /sandbox operation is active/);
+      const retryLock = acquireLock(root, { scope: "retire" });
+      assert.equal(retryLock.ok, true, "the retirement lock remained stranded after the sandbox gate refused it");
+      releaseLock(root, { ownerPid: retryLock.lock.ownerPid });
+    } finally { unlock?.(); await held; }
+  });
 });
 
 test("unrecognized ignored files block the retirement and are named", () => {

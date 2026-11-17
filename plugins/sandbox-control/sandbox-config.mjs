@@ -10,7 +10,11 @@
 // the build context is the boundary that keeps the host's content out
 // of the image, so a context outside the project defeats it.
 
-import { existsSync, readFileSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { existsSync, statSync, lstatSync, realpathSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { screenValue } from "./secret-screen.mjs";
 import net from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -93,12 +97,17 @@ function defaultCheckDependency(target) {
   });
 }
 
-export function readSandboxConfig(projectRoot) {
+export function readSandboxConfig(projectRoot, configPath = null) {
   // The root is canonicalized: on macOS a temporary directory lives
   // under `/var`, which is a symbolic link to `/private/var`, and the
   // containment check compares the canonical paths.
   const root = canonicalRoot(projectRoot);
-  const found = CONFIG_FILE_NAMES.map((name) => join(root, name)).find((path) => existsSync(path));
+  if (configPath !== null && (typeof configPath !== "string" || !configPath.trim() || isAbsolute(configPath) || /^[A-Za-z]:|\\/.test(configPath))) {
+    return { ok: false, reason: "the configuration path must be checkout-relative", missing: ["configuration path"] };
+  }
+  const selected = configPath === null ? null : resolveInside(root, configPath);
+  if (selected && !selected.ok) return { ...selected, missing: ["configuration inside the checkout"] };
+  const found = selected?.path ?? CONFIG_FILE_NAMES.map((name) => join(root, name)).find((path) => existsSync(path));
   if (!found) {
     return {
       ok: false,
@@ -108,12 +117,14 @@ export function readSandboxConfig(projectRoot) {
   }
 
   let parsed;
+  let bytes;
   try {
-    parsed = JSON.parse(readFileSync(found, "utf8"));
-  } catch (err) {
+    bytes = readConfigurationBytes(root, found);
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch {
     return {
       ok: false,
-      reason: `the sandbox configuration could not be parsed: ${err.message}`,
+      reason: "the sandbox configuration is unreadable, unsafe or invalid JSON, or the secure Python reader is unavailable",
       missing: ["valid configuration file"],
     };
   }
@@ -178,6 +189,8 @@ export function readSandboxConfig(projectRoot) {
     ok: true,
     config: {
       path: found,
+      relativePath: relative(root, found).split(sep).join("/"),
+      fingerprint: createHash("sha256").update(bytes).digest("hex"),
       dockerfile: dockerfile.path,
       dockerfileRelative: parsed.dockerfile,
       context: context.path,
@@ -190,6 +203,54 @@ export function readSandboxConfig(projectRoot) {
       limits: parsed.limits ?? {},
       include: Array.isArray(parsed.include) ? parsed.include : [],
     },
+  };
+}
+
+// Open each component relative to a held directory descriptor. A lstat-then-
+// open sequence would permit an ancestor symlink substitution between checks.
+// The existing Python dependency supplies the same primitives as worktrees.
+function readConfigurationBytes(root, path) {
+  const contained = resolveInside(root, path);
+  if (!contained.ok) throw new Error("unsafe configuration path");
+  const reader = fileURLToPath(new URL("./config-reader.py", import.meta.url));
+  const output = execFileSync("python3", ["-I", "-B", reader], {
+    input: JSON.stringify({ root, relative: relative(root, path).split(sep).join("/") }),
+    encoding: "utf8", stdio: ["pipe", "pipe", "ignore"], maxBuffer: 2 * 1024 * 1024, timeout: 5000,
+  });
+  const result = JSON.parse(output);
+  if (!result.ok || typeof result.bytes !== "string") throw new Error("secure config read unavailable");
+  return Buffer.from(result.bytes, "base64");
+}
+
+/** Revalidate the exact bytes used for parsing after the independent capture. */
+export function verifyConfigurationSnapshot(projectRoot, config) {
+  try {
+    const bytes = readConfigurationBytes(canonicalRoot(projectRoot), config.path);
+    if (createHash("sha256").update(bytes).digest("hex") !== config.fingerprint) throw new Error("changed");
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: "the sandbox configuration changed or became unverifiable during capture", inconsistent: true };
+  }
+}
+
+/** Explicit allowlist: never spread arbitrary JSON, secret values or URLs. */
+export function configurationEvidence(config) {
+  const parameters = {
+    dockerfile: config.dockerfileRelative,
+    context: config.contextRelative,
+    stage: config.stage,
+    allowExternalEgress: config.production.allowExternalEgress,
+    dependencyCount: config.dependencies.length,
+    testSecretCount: config.testSecrets.length,
+  };
+  for (const key of ["dockerfile", "context", "stage"]) {
+    if (screenValue(parameters[key])) parameters[key] = "[redacted]";
+  }
+  return {
+    path: screenValue(config.relativePath) ? "[redacted]" : config.relativePath,
+    fingerprint: config.fingerprint,
+    parameters,
+    captured: false,
   };
 }
 

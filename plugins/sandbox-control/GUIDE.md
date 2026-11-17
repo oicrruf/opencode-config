@@ -19,6 +19,9 @@ production. Starting the environment is not an approval.
   A CLI version or a context named desktop-linux alone is not proof.
 - A Node.js runtime that can load the plugin. The plugin itself needs no
   native dependency.
+- Python 3 with descriptor-relative no-follow filesystem primitives, already
+  used by worktree-control. Config reads reuse those primitives to prevent
+  ancestor-symlink substitution; absence blocks without installing anything.
 - A project that declares its build configuration.
 
 On a host that does not meet the requirements the control reports the
@@ -51,6 +54,22 @@ context outside the project would defeat it.
 A missing or incomplete declaration is reported as a block. The control
 does not guess.
 
+The lifecycle also accepts an explicit `configPath`, relative to the
+effective checkout root. Paths with spaces are supported; missing explicit
+files do not fall back to another declaration. The JSON must be a bounded
+regular file inside that checkout; configuration symlinks are refused.
+Dockerfile and build-context paths are relative to the checkout, including
+when the configuration lives in a subdirectory.
+
+The selected JSON stays outside the build capture, including hardlink
+aliases, and `include` cannot override that exclusion. The external
+execution record and report retain its SHA-256 fingerprint and an allowlist
+of parameters (Dockerfile, context, stage, egress and dependency/secret
+counts). They omit raw JSON, secret values, dependency URLs and arbitrary
+fields. The source JSON is revalidated after capture: changes or uncertain
+identity block before building. Explicit test secrets still travel only
+through the existing external secret file.
+
 ## The isolation boundary
 
 Every run happens inside a boundary the control constructs itself:
@@ -75,6 +94,21 @@ The build reads its context from the capture, which lives outside the
 worktree. A Dockerfile that points outside the capture is refused.
 
 ## The capture
+
+### Effective source resolution for the sandbox command
+
+The command source resolver uses the active V2 session's directory,
+project identity and session identity. It resolves the Git toplevel of
+that directory, then requires exactly one matching managed work entry
+confirmed by both inventory and the public worktree listing for the active
+project. A subdirectory resolves to the same checkout. Missing, conflicting
+or unverifiable work identity blocks; neither a branch name nor a caller's
+path/work identifier supplies authority. The common Git directory anchors
+project-wide state only and never silently selects a different source.
+
+The V2 command tools use this resolver before acquiring an operation or
+creating resources. An unavailable public listing or ambiguous identity is
+a block, never a reason to infer a different source.
 
 The capture copies the committed files, the modifications, and the new
 files into a temporary directory outside the worktree. It records a
@@ -131,11 +165,13 @@ The report is written **before** anything is removed. A failure to
 write it keeps the resources, because the evidence must be
 recoverable.
 
-Closing an execution requires the token that owns its reservation, and
-cancelling one requires it as well. Recovering an interrupted execution
-requires it too, because the recovery removes the environment. An actor
-that knows only the execution identity cannot destroy an environment it
-does not own.
+Ordinary finish, cancel and recover require the token bound to the exact
+reservation execution and generation. Explicit transfer is a separate,
+verified transition for the same managed work identity: it uses the active V2
+session, preserves evidence and closes attributable resources without asking
+for another session's token. Knowing an execution identity alone is
+insufficient. Application handoff requires the destination Compose file so
+its persistent mount mapping can be checked before teardown.
 
 ## The dependencies
 
@@ -157,8 +193,12 @@ before anything is launched, and the refusal names the work that holds
 it.
 
 The reservation records its owner, the supervisor identity, the start
-time, the process group, and the session. The owner token is the only
-way to stop the application. The token is high-entropy, is stored on
+time, the process group, and the session. Ordinary application stops require
+the owner token; explicit release may close a Compose application only when
+its labels and mounts map uniquely to one managed worktree in the project.
+For legacy reservations with stale work IDs, reports retain both the recorded
+owner and the runtime source worktree; ambiguity still blocks. The token is
+high-entropy, is stored on
 disk only as a salted verifier, and is never written to a log, a
 report, or an error message.
 
@@ -189,6 +229,89 @@ A cleanup that cannot complete keeps the quota and reports what
 remains.
 
 ## The recovery
+
+### Sandbox command and replacement
+
+After installation and a fresh OpenCode session, use:
+
+```text
+/sandbox help
+/sandbox release
+/sandbox build .opencode/sandbox.json
+/sandbox rebuild .opencode/sandbox.json
+/sandbox transfer .devcontainer/compose.yml
+```
+
+Build requires free quota. Rebuild requires this session's sandbox in the
+same checkout. Transfer explicitly changes ownership from a verified managed
+worktree for the same managed work identity; it validates the destination
+configuration before closure. For an application reservation the transfer
+path names the destination Compose file; the control renders it without
+starting resources, verifies exact persistent mounts, stops/removes the old
+containers without deleting volumes or bind paths, and rotates the slot to
+the destination in `awaiting-start`. The destination starts it through
+`reservation_start` with the returned token and exact foreground Compose
+command; the control checks the same persistent mapping again. Release closes
+the project's one verified sandbox or Compose application reservation on an
+explicit user/developer request. Both release and transfer ask for their named
+permission. Build/rebuild and transfer accept one literal checkout-relative
+path; for transfer, the reservation scope determines whether it is sandbox
+JSON or a Compose file. Release accepts no operands. The native V2 executor parses before model/tool
+dispatch and records a synthetic session response with queued delivery and
+`resume: false`, visible in the session inbox without waking the agent. Help
+and invalid arguments need no model. Variables and shell syntax are never
+expanded. New ownership has a fresh token and generation; old tokens and
+supervisors cannot act on it.
+
+Release and transfer stop/remove only resources that can be tied to the held
+reservation, exact Compose labels and one verified managed runtime source
+worktree. A transfer target must be a different managed worktree in the same
+project. Named database volumes and host upload paths are persistent and are
+preserved. Compose applications are eligible only when engine labels identify
+one project and its mounts map to exactly one managed worktree; name-only or
+ambiguous matches block without resource changes. Reports record the legacy
+reservation owner and runtime source separately when they differ. Compose
+networks are retained. For isolated sandbox
+runs, the JSON stays outside the capture and external evidence records its
+fingerprint and secret-free parameters. This command never deletes a Git
+worktree.
+
+Mutators share a cross-process `operation.json` gate, including ordinary
+start/finish/cancel/recover, manual applications, release, transfer and the supervisor. The
+`transition.json` journal records identities, generations and verified phases
+without tokens. The reservation stays occupied across old closure and the
+atomic successor replacement. Busy or unknown operations block instead of
+retrying. A failure to preserve evidence or verify resource absence keeps
+the reservation and blocks the successor.
+
+If a replacement is interrupted, explicitly request
+`sandbox_recover_transition` in the same managed work context. It verifies
+the previous operation's PID/start identity before recovering an abandoned
+gate and refuses a live or unverifiable owner. It resumes attributable
+closure only; it never starts another test or asks for a different session's
+token. A `running` transition whose token delivery was interrupted can be
+closed by its verified owning session or after proving the previous operation
+owner ended; an unrelated live session cannot use recovery to close it.
+Unknown/partial lock ownership remains blocked for operator
+reconciliation. Do not delete locks, reservations or journals to clear a
+block. Ordinary finish/cancel still require the current owner's token.
+Execution records are retained while resources/secrets are removed and are
+updated atomically, so a failed terminal write remains recoverable. Recovery
+also accepts an already closed provisional successor after verifying its
+report and resource absence; it never restarts a build to repair a journal.
+
+### Activation and rollback
+
+Run `./install.sh --profile <selected>` only when activating the reviewed
+change, start a fresh execution and verify with `bash ./install.sh --check`.
+No model override or broader agent permission is needed for `/sandbox`.
+Old records without a verified session, source and generation remain readable
+but cannot be silently upgraded or transferred.
+
+Before rolling back, stop new transfers and close/recover executions with
+the version that understands their records. Preserve external reports.
+Reinstall the previous version only after verifying absence of incompatible
+resources/transitions; do not discard state to make the old version start.
 
 An execution interrupted while it was being prepared, run, or cleaned
 up is recovered by consulting its record and the engine's own state.

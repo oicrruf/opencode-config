@@ -60,6 +60,12 @@ export function validBinding(binding) {
     typeof binding.id === 'string' && /^[A-Za-z0-9:_-]{1,255}$/.test(binding.id) && binding.osType === 'linux' &&
     (binding.platform !== 'darwin' || binding.operatingSystem === 'Docker Desktop');
 }
+export function boundEngineEnvironment(binding, base = process.env) {
+  if (!validBinding(binding) || !base || typeof base !== 'object' || Array.isArray(base)) {
+    throw new Error('a verified local engine binding and environment are required');
+  }
+  return environment(base, binding.endpoint);
+}
 export function boundDocker(binding, deps = {}) {
   if (!validBinding(binding)) throw new Error('execution has no verified engine binding; preserve resources and reconcile explicitly');
   const run = deps.execFileSync ?? execFileSync;
