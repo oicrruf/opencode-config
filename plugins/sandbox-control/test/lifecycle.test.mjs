@@ -174,6 +174,156 @@ function dockerStub(state = {}) {
   return { ...withEngineStub(execFileSync), calls, present };
 }
 
+function prepareFixtureProject(dir, overrides = {}) {
+  prepareProject(dir);
+  const configPath = join(dir, ".opencode/sandbox.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  delete config.include;
+  delete config.ports;
+  config.fixtureInputs = ["Dockerfile", "app/main.txt"];
+  writeFileSync(configPath, JSON.stringify({ ...config, ...overrides }));
+  writeFileSync(join(dir, "unselected.txt"), 'password="unselected-sentinel-value"');
+}
+
+test("fixture lifecycle builds exact independent inputs with no ports/host mounts/egress and retains attributable evidence", async () => {
+  await withRepo(async (dir) => {
+    prepareFixtureProject(dir);
+    const docker = dockerStub();
+    let buildObserved = false;
+    const original = docker.execFileSync;
+    docker.execFileSync = (command, args, options) => {
+      if (args.includes("build")) {
+        buildObserved = true;
+        const context = args.at(-1);
+        assert.equal(existsSync(join(context, "unselected.txt")), false);
+        assert.equal(existsSync(join(context, ".opencode")), false);
+        assert.equal(existsSync(join(context, ".opencode-sandbox-capture.json")), false);
+        assert.equal(readFileSync(join(context, "app/main.txt"), "utf8"), "content\n");
+        assert.ok(args.includes("--network") && args.includes("none"));
+        assert.ok(args.includes("--pull=false"));
+      }
+      return original(command, args, options);
+    };
+    const started = await startSandbox({ cwd: dir, worktreePath: dir, workId: "fixture-proof" }, docker);
+    assert.equal(started.ok, true, started.reason);
+    assert.equal(buildObserved, true);
+    assert.equal(started.execution.configuration.parameters.captureMode, "fixture-inputs");
+    assert.equal(started.execution.capture.manifest.configurationFingerprint, started.execution.configuration.fingerprint);
+    const network = docker.calls.find((call) => call.includes("network create"));
+    assert.match(network, /--internal/);
+    const run = docker.calls.find((call) => call.includes(" run "));
+    assert.doesNotMatch(run, /--publish|--mount|--volume|--privileged|--network=host/);
+    const closed = finishSandbox(dir, started.execution.executionId, { token: started.token, result: "passed" }, docker);
+    assert.equal(closed.ok, true, closed.reason);
+    const report = JSON.parse(readFileSync(closed.reportPath, "utf8"));
+    assert.equal(report.capture.mode, "fixture-inputs");
+    assert.deepEqual(report.capture.selectedPaths, ["Dockerfile", "app/main.txt"]);
+    assert.equal(report.capture.inputFiles.length, 2);
+    assert.ok(report.capture.inputFiles.every((file) => file.fingerprint && file.identity));
+    assert.match(report.capture.scope, /not a whole-checkout/);
+    assert.equal(JSON.stringify(report).includes("unselected-sentinel-value"), false);
+    assert.equal(existsSync(started.execution.capture.destination), false);
+    assert.equal(readReservation(dir).state, "free");
+  });
+});
+
+for (const mutation of ["capture", "source", "configuration", "extra", "directory-symlink"]) {
+  test(`fixture ${mutation} mutation immediately before build blocks resource creation, saves evidence and releases quota`, async () => {
+    await withRepo(async (dir) => {
+      prepareFixtureProject(dir);
+      const docker = dockerStub();
+      const result = await startSandbox({ cwd: dir, worktreePath: dir, workId: "fixture-mutation" }, {
+        ...docker, onBeforeFixtureBuild(destination) {
+          if (mutation === "capture") writeFileSync(join(destination, "app/main.txt"), "mutated");
+          if (mutation === "source") writeFileSync(join(dir, "app/main.txt"), "mutated");
+          if (mutation === "configuration") writeFileSync(join(dir, ".opencode/sandbox.json"), "{}");
+          if (mutation === "extra") writeFileSync(join(destination, "unselected"), "mutated");
+          if (mutation === "directory-symlink") {
+            rmSync(join(destination, "app"), { recursive: true });
+            symlinkSync(join(dir, "app"), join(destination, "app"));
+          }
+        },
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.blocked, true);
+      assert.equal(result.phase, "fixture revalidation");
+      assert.equal(result.quotaReleased, true);
+      assert.equal(readReservation(dir).state, "free");
+      assert.equal(docker.calls.some((call) => / build | run |network create/.test(call)), false);
+      assert.ok(result.reportPath);
+      const report = JSON.parse(readFileSync(result.reportPath, "utf8"));
+      assert.equal(report.result, "blocked");
+      assert.equal(report.capture.mode, "fixture-inputs");
+      const captures = join(dir, ".opencode/state/sandbox/captures");
+      assert.deepEqual(fs.readdirSync(captures), []);
+    });
+  });
+}
+
+test("selected secret refusal persists scoped evidence without content and frees quota before any build", async () => {
+  await withRepo(async (dir) => {
+    prepareFixtureProject(dir);
+    writeFileSync(join(dir, "app/main.txt"), 'password="selected-sentinel-value"');
+    const docker = dockerStub();
+    const result = await startSandbox({ cwd: dir, worktreePath: dir, workId: "fixture-secret" }, docker);
+    assert.equal(result.ok, false);
+    assert.equal(result.quotaReleased, true);
+    assert.equal(result.phase, "capture");
+    assert.equal(docker.calls.some((call) => / build | run |network create/.test(call)), false);
+    const evidence = readFileSync(result.reportPath, "utf8");
+    assert.equal(evidence.includes("selected-sentinel-value"), false);
+    assert.equal(JSON.parse(evidence).capture.mode, "fixture-inputs");
+    assert.equal(readReservation(dir).state, "free");
+  });
+});
+
+test("missing pinned fixture image blocks without pull/build/provisioning and preserves refusal evidence", async () => {
+  await withRepo(async (dir) => {
+    prepareFixtureProject(dir);
+    writeFileSync(join(dir, "Dockerfile"), `FROM fixture/runtime@sha256:${"a".repeat(64)} AS test\n`);
+    const docker = dockerStub();
+    const result = await startSandbox({ cwd: dir, worktreePath: dir, workId: "fixture-missing" }, docker);
+    assert.equal(result.ok, false);
+    assert.equal(result.blocked, true);
+    assert.equal(result.phase, "fixture dependencies");
+    assert.equal(result.quotaReleased, true);
+    assert.ok(result.reportPath);
+    assert.match(result.reason, /unavailable locally/);
+    assert.equal(docker.calls.some((call) => / pull | build | run |network create/.test(call)), false);
+    assert.equal(readReservation(dir).state, "free");
+  });
+});
+
+test("fixture refusal retains its quota and complete recovery record when evidence cannot be saved", async () => {
+  await withRepo(async (dir) => {
+    prepareFixtureProject(dir);
+    const docker = dockerStub();
+    const original = fs.writeFileSync;
+    let result;
+    try {
+      fs.writeFileSync = function(path, ...args) {
+        if (String(path).includes("/reports/")) throw Error("injected evidence failure");
+        return original(path, ...args);
+      };
+      syncBuiltinESMExports();
+      result = await startSandbox({ cwd: dir, worktreePath: dir, workId: "fixture-evidence" }, {
+        ...docker, onBeforeFixtureBuild(destination) { writeFileSync(join(destination, "app/main.txt"), "mutated"); },
+      });
+    } finally { fs.writeFileSync = original; syncBuiltinESMExports(); }
+    assert.equal(result.ok, false);
+    assert.equal(result.quotaReleased, false);
+    assert.equal(readReservation(dir).state, "held");
+    const record = readExecutionRecord(dir, result.executionId);
+    assert.equal(record.ok, true);
+    assert.equal(record.record.phase, "cleanup-pending");
+    assert.ok(record.record.capture?.manifest);
+    assert.equal(docker.calls.some((call) => / build | run |network create/.test(call)), false);
+    const recovered = recoverSandbox(dir, result.executionId, { ...docker, token: result.token });
+    assert.equal(recovered.ok, true, recovered.reason);
+    assert.equal(recovered.quotaReleased, true);
+  });
+});
+
 test("a work name is normalized for use in a resource name", () => {
   assert.equal(normalizeWorkName("My Work Item!"), "my-work-item");
   assert.equal(normalizeWorkName(""), "work");

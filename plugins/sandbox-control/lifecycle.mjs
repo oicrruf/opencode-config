@@ -18,7 +18,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, writeFileSync, rmSync, mkdirSync, readdirSync, unlinkSync, rmdirSync, renameSync } from "node:fs";
 import { join, relative, resolve, sep, isAbsolute } from "node:path";
 import { acquireReservation, releaseReservation, verifyOwner, readReservation } from "./reservation.mjs";
-import { takeCapture, prepareIndependentRepository } from "./sandbox-capture.mjs";
+import { takeCapture, prepareIndependentRepository, verifyFixtureCapture, verifyFixtureSource } from "./sandbox-capture.mjs";
+import { checkFixtureRuntimeInputs, readFixtureSnapshot, discardFixtureSnapshot } from "./fixture-inputs.mjs";
 import { readSandboxConfig, checkDependencies, verifyConfigurationSnapshot, configurationEvidence } from "./sandbox-config.mjs";
 import {
   buildBuildArguments,
@@ -224,7 +225,13 @@ async function startSandboxImpl(input, deps = {}) {
     workName,
     executionId: identity.executionId,
     cwd,
-    include: config.config.include,
+    ...(config.config.fixtureInputs ? {
+      fixtureInputs: config.config.fixtureInputs,
+      fixtureSourceIdentity: config.config.fixtureSourceIdentity,
+      dockerfile: config.config.dockerfileRelative,
+      context: config.config.contextRelative,
+      configurationFingerprint: config.config.fingerprint,
+    } : { include: config.config.include }),
     protectedPaths: [config.config.relativePath],
     onBeforeCompare: deps.onBeforeCaptureCompare,
   });
@@ -238,6 +245,17 @@ async function startSandboxImpl(input, deps = {}) {
 
   const configurationStable = verifyConfigurationSnapshot(projectRoot, config.config);
   if (!configurationStable.ok) return failBeforeResources(configurationStable.reason, "configuration");
+
+  if (config.config.fixtureInputs) {
+    const dockerfileSnapshot = readFixtureSnapshot(capture.destination, [config.config.dockerfileRelative]);
+    if (!dockerfileSnapshot.ok ||
+        dockerfileSnapshot.files[0].fingerprint !== capture.manifest.files.find((file) => file.path === config.config.dockerfileRelative)?.fingerprint) {
+      return failBeforeResources("the fixture Dockerfile changed or became unverifiable", "fixture dependencies");
+    }
+    const runtime = checkFixtureRuntimeInputs(dockerfileSnapshot.files[0].bytes, run);
+    if (!runtime.ok) return failBeforeResources(runtime.reason, "fixture dependencies");
+    record.fixtureRuntimeInputs = runtime.images;
+  }
 
   const secrets = writeSecretFile(cwd, identity.executionId, config.config.testSecrets);
   if (!secrets.ok) {
@@ -298,7 +316,10 @@ async function startSandboxImpl(input, deps = {}) {
       const captureSegments = [".opencode", "state", "sandbox", "captures", identity.executionId];
       const capturePath = verifyManagedPath(cwd, captureSegments);
       if (!capturePath.ok) throw new Error(capturePath.reason);
-      removeManagedTree(cwd, captureSegments);
+      if (config.config.fixtureInputs) {
+        const root = captureRootDir(cwd);
+        if (!root.ok || !discardFixtureSnapshot(root.dir, identity.executionId)) throw new Error("fixture capture cleanup could not be verified");
+      } else removeManagedTree(cwd, captureSegments);
       if (existsSync(capturePath.path)) throw new Error("the capture still exists after preflight cleanup");
 
       const executionSegments = [".opencode", "state", "sandbox", "executions", identity.executionId];
@@ -311,10 +332,32 @@ async function startSandboxImpl(input, deps = {}) {
   }
 
   function failBeforeResources(reason, phase, refused, refusals) {
+    // Fixture refusal evidence survives removal of private staging and quota
+    // release. Raw input bytes and credential-shaped findings never enter it.
+    let evidence;
+    if (config.config.fixtureInputs) {
+      record.result = "blocked";
+      record.phase = phase;
+      record.failure = reason;
+      const report = buildReport(record, { result: "blocked", steps: [`fixture blocked in ${phase}`, screenValue(reason) ? "unsafe input refused" : reason] });
+      evidence = report.ok ? writeReport(cwd, identity.executionId, report.report) : report;
+      if (!evidence.ok) {
+        record.phase = "cleanup-pending";
+        writeExecutionRecord(cwd, record);
+        return {
+          ok: false, blocked: true, reason: evidence.reason, phase,
+          quotaReleased: false, resourcesKept: true,
+          executionId: identity.executionId, token: acquired.token,
+        };
+      }
+      record.reportPath = evidence.path;
+    }
     const cleanup = removePreflightState();
+    if (!cleanup.ok && config.config.fixtureInputs) writeExecutionRecord(cwd, { ...record, phase: "cleanup-pending" });
     const released = cleanup.ok ? releaseReservation(cwd, acquired.token, { resourcesAbsent: true }) : { ok: false };
     return {
-      ok: false, reason, phase, quotaReleased: released.ok, resourcesKept: !released.ok,
+      ok: false, blocked: Boolean(config.config.fixtureInputs), reason, phase, quotaReleased: released.ok, resourcesKept: !released.ok,
+      ...(evidence?.path ? { reportPath: evidence.path } : {}),
       ...(refused ? { refused } : {}), ...(refusals ? { refusals } : {}),
       ...(!released.ok ? { executionId: identity.executionId, token: acquired.token } : {}),
     };
@@ -346,9 +389,20 @@ async function startSandboxImpl(input, deps = {}) {
       quotaReleased,
       resourcesKept: !cleanup.ok,
       remaining: cleanup.remaining ?? [],
+      ...(record.reportPath ? { reportPath: record.reportPath } : {}),
       ...(!quotaReleased ? { executionId: identity.executionId, token: acquired.token } : {}),
     };
   };
+
+  if (config.config.fixtureInputs) {
+    deps.onBeforeFixtureBuild?.(capture.destination);
+    const stableConfig = verifyConfigurationSnapshot(projectRoot, config.config);
+    const stableSource = verifyFixtureSource(capture.manifest);
+    const stableCapture = verifyFixtureCapture(capture.destination, capture.manifest);
+    if (!stableConfig.ok || !stableSource.ok || !stableCapture.ok) {
+      return failBeforeResources(stableConfig.reason ?? stableSource.reason ?? stableCapture.reason, "fixture revalidation");
+    }
+  }
 
   try {
     run("docker", build.args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
@@ -471,6 +525,11 @@ export function sandboxStatus(cwd, executionId) {
       image: record.record.image,
       container: record.record.container,
       captureFingerprint: record.record.capture?.manifest?.files?.length ?? null,
+      captureMode: record.record.configuration?.parameters?.captureMode ?? "full-checkout",
+      ...(record.record.configuration?.parameters?.captureMode === "fixture-inputs" ? {
+        scope: "selected fixture inputs only",
+        selectedInputCount: record.record.configuration.parameters.fixtureInputs.length,
+      } : {}),
       secretNames: record.record.secretNames,
     },
     pendingManualTest: record.record.result === null,
@@ -607,6 +666,7 @@ function finishSandboxImpl(cwd, executionId, input, deps = {}) {
       ok: false,
       reason: written.reason,
       resourcesKept: true,
+      quotaReleased: false,
       note: "the resources are kept because the evidence could not be preserved",
     };
   }
@@ -701,6 +761,14 @@ export function buildReport(record, input) {
       startedAt: record.startedAt,
       concludedAt: new Date().toISOString(),
       capture: {
+        mode: record.configuration?.parameters?.captureMode ?? "full-checkout",
+        ...(record.configuration?.parameters?.captureMode === "fixture-inputs" ? {
+          selectedPaths: record.configuration.parameters.fixtureInputs,
+          configurationFingerprint: record.configuration.fingerprint,
+          inputFiles: record.capture?.manifest?.files ?? [],
+          runtimeImages: record.fixtureRuntimeInputs ?? [],
+          scope: "selected fixture inputs only; not a whole-checkout certification",
+        } : {}),
         branch: record.capture?.manifest?.branch ?? null,
         head: record.capture?.manifest?.head ?? null,
         files: record.capture?.manifest?.files?.length ?? 0,

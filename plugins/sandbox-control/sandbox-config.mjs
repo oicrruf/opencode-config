@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { screenValue } from "./secret-screen.mjs";
+import { validateFixtureInputs, readFixtureSnapshot, fixtureIdentity } from "./fixture-inputs.mjs";
 import net from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -185,6 +186,26 @@ export function readSandboxConfig(projectRoot, configPath = null) {
     };
   }
 
+  let fixture;
+  let fixtureSourceIdentity;
+  if (Object.hasOwn(parsed, "fixtureInputs")) {
+    if (allowExternalEgress === true || (parsed.dependencies?.length ?? 0) > 0 || (parsed.ports?.length ?? 0) > 0) {
+      return { ok: false, reason: "fixtureInputs requires no external egress, exposed ports or network service dependencies", missing: ["isolated fixture runtime"] };
+    }
+    fixture = validateFixtureInputs(parsed.fixtureInputs, {
+      include: parsed.include, dockerfile: parsed.dockerfile, context: parsed.context,
+      protectedPaths: [relative(root, found).split(sep).join("/")],
+    });
+    if (!fixture.ok) return { ...fixture, missing: ["safe fixtureInputs"] };
+    // Even include:null is a simultaneous declaration, not an absent selector.
+    if (Object.hasOwn(parsed, "include")) {
+      return { ok: false, reason: "fixtureInputs cannot be combined with include", missing: ["unambiguous fixtureInputs"] };
+    }
+    const snapshot = readFixtureSnapshot(root, fixture.paths);
+    if (!snapshot.ok) return { ...snapshot, missing: ["safe fixture input files"] };
+    fixtureSourceIdentity = fixtureIdentity(snapshot.files);
+  }
+
   return {
     ok: true,
     config: {
@@ -202,6 +223,7 @@ export function readSandboxConfig(projectRoot, configPath = null) {
       testSecrets: Array.isArray(parsed.testSecrets) ? parsed.testSecrets : [],
       limits: parsed.limits ?? {},
       include: Array.isArray(parsed.include) ? parsed.include : [],
+      ...(fixture ? { fixtureInputs: fixture.paths, fixtureSourceIdentity } : {}),
     },
   };
 }
@@ -242,6 +264,8 @@ export function configurationEvidence(config) {
     allowExternalEgress: config.production.allowExternalEgress,
     dependencyCount: config.dependencies.length,
     testSecretCount: config.testSecrets.length,
+    captureMode: config.fixtureInputs ? "fixture-inputs" : "full-checkout",
+    ...(config.fixtureInputs ? { fixtureInputs: config.fixtureInputs } : {}),
   };
   for (const key of ["dockerfile", "context", "stage"]) {
     if (screenValue(parameters[key])) parameters[key] = "[redacted]";

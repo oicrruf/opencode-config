@@ -65,8 +65,15 @@ validators.
   The `agent-routing` spec (`openspec/specs/agent-routing/spec.md`) is the
   contract for routing decisions; profile edits that change model
   assignments MUST keep the spec aligned.
-- **Runtime verification sandbox.** A change that can only be verified at
-  runtime is verified through the sandbox control
+- **Workspace selection.** Use the current checkout for bounded work.
+  Use a managed worktree only when task size warrants isolation or another
+  task is actively being developed and needs separation. Reuse a checkout
+  already dedicated to the task, and preserve unrelated changes.
+- **Runtime verification sandbox.** Only the user may initiate a sandbox
+  build or replacement through the native `/sandbox` command. Continue
+  authorized development, independent checks and PR preparation. Record
+  sandbox-only checks as not run unless requested, or as blocked if an
+  explicitly requested run cannot start. Run those checks through the control
   (`plugins/sandbox-control/`) instead of on the host. The sandbox takes
   an independent capture of the work under test, runs it inside a local
   Docker engine with no host network, no added privileges, no mount of

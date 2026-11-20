@@ -1,5 +1,6 @@
 import { withSandboxOperation } from "./operation.mjs";
 import { resolveSandboxSource } from "./source.mjs";
+import { resolveReleaseSource, resolveGitReleaseSource } from "./release-source.mjs";
 import { canonicalPath, isInside } from "./paths.mjs";
 import { readReservation, releaseVerifiedReservation, handoffApplicationReservation } from "./reservation.mjs";
 import { inspectLocalEngine, boundDocker } from "./engine.mjs";
@@ -143,16 +144,24 @@ function reportResourceOwner(report, inventory) {
 /** Explicitly release an application only after Compose labels and mounts
  * prove the exact managed source worktree. Docker volumes are never removed. */
 export async function releaseProjectReservation(context, deps = {}) {
-  const source = await resolveSandboxSource(context);
+  const source = await resolveReleaseSource(context);
   if (!source.ok) return source;
   return withSandboxOperation(source.worktreePath, "sandboxRelease", async () => {
     const current = readReservation(source.worktreePath);
     if (!current.ok) return blocked("the project reservation is unverifiable");
     if (current.state === "free") return { ok: true, released: false, reason: "the project reservation is already free" };
     const reservation = current.reservation;
-    const listing = await listWorktrees(context.worktree, source.worktreePath);
-    if (!listing.verified) return blocked(listing.reason ?? "the managed worktree inventory is unverifiable");
-    const inventory = reconcileInventory(source.projectRoot, listing.worktrees, { verified: true });
+    let inventory;
+    if (source.releaseGitFallback) {
+      const refreshed = resolveGitReleaseSource(context);
+      if (!refreshed.ok) return refreshed;
+      if (refreshed.projectRoot !== source.projectRoot || refreshed.worktreePath !== source.worktreePath) return blocked("the release project changed while acquiring its operation");
+      inventory = refreshed.inventory;
+    } else {
+      const listing = await listWorktrees(context.worktree, source.worktreePath);
+      if (!listing.verified) return blocked(listing.reason ?? "the managed worktree inventory is unverifiable");
+      inventory = reconcileInventory(source.projectRoot, listing.worktrees, { verified: true });
+    }
     if (!inventory.ok) return blocked(inventory.reason);
     const ownerMatches = inventory.present.filter((entry) => entry?.workId === reservation.workId && entry?.exists === true && typeof entry.directory === "string");
 

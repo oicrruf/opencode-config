@@ -46,7 +46,7 @@ test("V2 reservation_start reconciles the public worktree listing with managed i
   }
 });
 
-test("V2 new tools register once and use only verified session/project context", async (t) => {
+test("V2 agent tools cannot load a sandbox even with a verified session and permissive permissions", async (t) => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), "sandbox-v2-command-")));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   execFileSync("git", ["init", "-q", directory], { stdio: "ignore" });
@@ -58,26 +58,26 @@ test("V2 new tools register once and use only verified session/project context",
   let sessionReads = 0;
   let worktreeReads = 0;
   let denyRelease = false;
-  let denyTransfer = false;
+  const actions = [];
   const context = {
     permission: { async assert(input) {
       assert.equal(input.sessionID, "real-session");
-      assert.ok(["sandbox_build", "sandbox_release", "sandbox_transfer"].includes(input.action));
+      actions.push(input.action);
       if (denyRelease && input.action === "sandbox_release") throw new Error("permission denied");
-      if (denyTransfer && input.action === "sandbox_transfer") throw new Error("permission denied");
     } },
     session: { async get({ sessionID }) { sessionReads++; assert.equal(sessionID, "real-session"); return { directory, projectID: "real-project" }; } },
     worktree: { async create() {}, async remove() {}, async list(input) { worktreeReads++; assert.deepEqual(input, { projectID: "real-project" }); return [{ directory }]; } },
     tool: { async transform(edit) { edit({ add: (definition) => tools.push(definition) }); return { dispose() {} }; } },
   };
-  await registerV2Tools(context, "fixture", () => SandboxControlPlugin(withEngineStub(() => "")), { worktree: true });
-  for (const name of ["sandbox_build", "sandbox_rebuild", "sandbox_transfer", "sandbox_release", "sandbox_recover_transition"]) {
+  let dockerCalls = 0;
+  await registerV2Tools(context, "fixture", () => SandboxControlPlugin(withEngineStub(() => { dockerCalls++; return ""; })), { worktree: true });
+  for (const name of ["sandbox_start", "sandbox_build", "sandbox_rebuild", "sandbox_transfer", "sandbox_release", "sandbox_recover_transition"]) {
     assert.equal(tools.filter((definition) => definition.name === name).length, 1);
   }
   const build = tools.find((definition) => definition.name === "sandbox_build");
   const release = tools.find((definition) => definition.name === "sandbox_release");
   const transfer = tools.find((definition) => definition.name === "sandbox_transfer");
-  assert.deepEqual(build.input.required, ["configPath"]);
+  assert.deepEqual(build.input.required, []);
   assert.equal(build.input.additionalProperties, false);
   assert.deepEqual(release.input.properties, {});
   assert.deepEqual(release.input.required, []);
@@ -88,18 +88,23 @@ test("V2 new tools register once and use only verified session/project context",
   const forged = JSON.parse((await build.execute({ configPath: ".opencode/sandbox.json", sessionId: "forged" }, { sessionID: "real-session" })).content);
   assert.equal(forged.ok, false);
   assert.equal(readReservation(directory).state, "free");
+  for (const [name, input, command] of [
+    ["sandbox_start", { workId: "AT-200", workName: "fixture", worktreePath: directory }, "build"],
+    ["sandbox_build", { configPath: ".opencode/sandbox.json" }, "build"],
+    ["sandbox_rebuild", { configPath: ".opencode/sandbox.json" }, "rebuild"],
+    ["sandbox_transfer", { configPath: ".opencode/sandbox.json" }, "transfer"],
+  ]) {
+    const tool = tools.find((definition) => definition.name === name);
+    const result = JSON.parse((await tool.execute(input, { sessionID: "real-session" })).content);
+    assert.equal(result.blocked, true, name);
+    assert.equal(result.reason, `Only the user may invoke /sandbox ${command}${command === "transfer" ? " <config>" : ""}.`, name);
+  }
+  assert.equal(worktreeReads, 0);
+  assert.equal(dockerCalls, 0);
+  assert.deepEqual(actions, []);
+  assert.equal(readReservation(directory).state, "free");
   denyRelease = true;
   await assert.rejects(release.execute({}, { sessionID: "real-session" }), /permission denied/);
+  assert.deepEqual(actions, ["sandbox_release"]);
   assert.equal(readReservation(directory).state, "free");
-  denyTransfer = true;
-  const worktreeReadsBeforeTransferDenial = worktreeReads;
-  await assert.rejects(transfer.execute({ configPath: ".devcontainer/compose.yml" }, { sessionID: "real-session" }), /permission denied/);
-  assert.equal(worktreeReads, worktreeReadsBeforeTransferDenial, "denied transfer must not resolve the source worktree");
-  assert.equal(readReservation(directory).state, "free");
-  denyRelease = false;
-  const result = JSON.parse((await build.execute({ configPath: ".opencode/sandbox.json" }, { sessionID: "real-session" })).content);
-  assert.equal(result.ok, true, result.reason);
-  assert.equal(result.execution.sessionId, "real-session");
-  assert.equal(result.execution.projectID, "real-project");
-  assert.equal(readReservation(directory).reservation.sessionId, "real-session");
 });

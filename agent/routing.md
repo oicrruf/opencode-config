@@ -91,6 +91,21 @@ a site without an explicit quoting intent, SHALL NOT be classified as
 `audit` — it is `spec-required` implementation work (or `adversarial`/
 `qa` when the ask is review).
 
+## Workspace and runtime verification
+
+Use the current checkout for bounded work. Use the managed worktree control
+only when the task is large enough to benefit from isolation or another task
+is actively being developed and needs separation. Reuse a checkout already
+dedicated to the task and preserve unrelated changes. An OpenSpec change or
+a separate branch alone does not require a worktree.
+
+Only the user may start or replace a sandbox through the native
+`/sandbox` command. A general request to test does not authorize a sandbox
+start. Continue authorized development, independent checks, and PR
+preparation. Record sandbox-only checks as not run when the user has not
+requested a sandbox, or blocked when an explicitly requested run fails
+to start. Sandbox prerequisites alone do not justify creating a worktree.
+
 ## Adversarial dispatch policy
 
 The coordinator (typically `build`, or `refactor` for its compatibility

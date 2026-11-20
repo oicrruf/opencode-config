@@ -84,6 +84,19 @@ Implement tasks from an OpenSpec change.
 
 6. **Implement tasks (loop until done or blocked)**
 
+   Use the current checkout for bounded work. Use the managed worktree control
+   only when the task is large enough to benefit from isolation or another task
+   is actively being developed and needs separation. Reuse a checkout already
+   dedicated to the task and preserve unrelated changes. An OpenSpec change or
+   a separate branch alone does not require a worktree.
+
+   Only the user may start or replace a sandbox through the native
+   `/sandbox` command. A general request to test does not authorize a sandbox
+   start. Continue authorized development, independent checks, and PR
+   preparation. Record sandbox-only checks as not run when the user has not
+   requested a sandbox, or blocked when an explicitly requested run fails
+   to start. Sandbox prerequisites alone do not justify creating a worktree.
+
    For each pending task:
    - Show which task is being worked on
    - Make the code changes required
@@ -95,7 +108,7 @@ Implement tasks from an OpenSpec change.
    - Task is unclear → ask for clarification
    - Implementation reveals a design issue → suggest updating artifacts
    - A task needs work beyond what the spec and tasks describe, or you are tempted to drop, narrow, defer, or accept exceptions to specified behavior to make it fit → surface the added scope and ask; do not absorb it silently
-   - Error or blocker encountered → report and wait for guidance
+   - A blocker prevents all remaining authorized work → report it and wait for guidance
    - User interrupts
 
 7. **On completion or pause, show status**

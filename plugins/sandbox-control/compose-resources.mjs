@@ -30,11 +30,11 @@ function parseInspection(output, id, platform = process.platform) {
   const fields = String(output).trimEnd().split("\t");
   if (fields.length !== 9) return null;
   const [fullId, state, project, workingDirectory, configFiles, service, name, mounts, networks] = fields.map(parseJsonLine);
-  if (fullId !== id || !boundedString(state, 32) || !boundedString(project, 128) || !boundedString(workingDirectory) ||
-      !boundedString(configFiles) || !boundedString(service, 128) || !boundedString(name, 256)) return null;
+  if (fullId !== id || !boundedString(state, 32) || !boundedString(project, 128) || (workingDirectory !== null && !boundedString(workingDirectory)) ||
+      (configFiles !== null && !boundedString(configFiles)) || !boundedString(service, 128) || !boundedString(name, 256)) return null;
   if (!SAFE_NAME.test(project) || !SAFE_NAME.test(service) || !SAFE_NAME.test(name.replace(/^\//, ""))) return null;
-  const configs = configFiles.split(",").map((path) => path.trim());
-  if (!configs.length || configs.some((path) => !boundedString(path) || !path.startsWith("/"))) return null;
+  const configs = configFiles === null ? [] : configFiles.split(",").map((path) => path.trim());
+  if ((configFiles !== null && !configs.length) || configs.some((path) => !boundedString(path) || !path.startsWith("/"))) return null;
   const normalizedMounts = [];
   let unsupportedMounts = !Array.isArray(mounts);
   for (const mount of Array.isArray(mounts) ? mounts : []) {
@@ -55,7 +55,8 @@ function parseInspection(output, id, platform = process.platform) {
     id,
     state,
     project,
-    workingDirectory: canonicalPath(workingDirectory),
+    workingDirectory: workingDirectory === null ? null : canonicalPath(workingDirectory),
+    incompleteOwnership: workingDirectory === null || configFiles === null,
     configFiles: configs.map(canonicalPath).sort(),
     service,
     name: name.replace(/^\//, ""),
@@ -66,6 +67,7 @@ function parseInspection(output, id, platform = process.platform) {
 }
 
 function belongsToWorktree(container, projectRoot, worktreePath) {
+  if (container.incompleteOwnership) return false;
   const configBelongs = container.configFiles.some((path) => isInside(projectRoot, path) || isInside(worktreePath, path));
   const projectContextBelongs = isInside(projectRoot, container.workingDirectory) || isInside(worktreePath, container.workingDirectory);
   const sourceMountBelongs = container.mounts.some((mount) => mount.type === "bind" && isInside(worktreePath, mount.source));
@@ -143,6 +145,15 @@ export function discoverComposeProject(docker, { projectRoot, workId, worktreePa
       if (!belongsToWorktree(container, root, worktree)) continue;
       const key = groupKey(container);
       groups.add(key);
+    }
+    const selectedProjects = new Set(containers.filter((container) => belongsToWorktree(container, root, worktree)).map((container) => container.project));
+    if (containers.some((container) => container.incompleteOwnership &&
+        (selectedProjects.has(container.project) ||
+         (container.workingDirectory && (isInside(root, container.workingDirectory) || isInside(worktree, container.workingDirectory))) ||
+         container.configFiles.some((path) => isInside(root, path) || isInside(worktree, path)) ||
+         container.mounts.some((mount) => mount.type === "bind" && (isInside(root, mount.source) || isInside(worktree, mount.source))) ||
+         container.unsupportedMounts))) {
+      return blocked("a potentially related Compose container has incomplete ownership labels");
     }
     if (groups.size !== 1) return blocked(groups.size === 0
       ? "no Compose project is verifiably attached to the reserved worktree"
