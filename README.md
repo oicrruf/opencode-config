@@ -330,6 +330,13 @@ for compatibility only.
 
 ## Runtime verification sandbox
 
+This repository keeps its sandbox declaration in `.opencode/sandbox.json`
+and its runtime recipe in `Dockerfile.sandbox`. The recipe uses the pinned
+OpenCode fixture image and loads this checkout's sandbox and worktree
+plugins from an explicit list of runtime files. Use `/sandbox build` when you want to start the environment from a
+verified checkout. The project files can be prepared independently of that
+command.
+
 Some changes can only be verified at runtime: a container that does not
 build, a service that does not answer, a page that does not render. The
 sandbox control verifies them from recorded evidence instead of from a

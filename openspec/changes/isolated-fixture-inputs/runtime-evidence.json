@@ -1,0 +1,47 @@
+{
+  "result": "passed",
+  "scope": "generic selected-input managed smoke, not WordPress acceptance",
+  "executionId": "fixture-inputs-smoke-8d304bee",
+  "negativeExecutionId": "fixture-inputs-negative-09dcb6ce",
+  "selectedCredentialRefused": true,
+  "selectedPaths": ["fixture/Dockerfile", "fixture/marker.txt"],
+  "configurationFingerprint": "7a0f6d9c5cf7560a5ccb518295da3a8f4a97b697116190408b76333a23445375",
+  "captureFingerprint": "2db8264ca7c68dff2e486adf7117d46a388803895a3562b0bd08f05d0eeb1756",
+  "baseImage": "alpine@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b",
+  "isolation": {
+    "noHostMounts": true,
+    "noPorts": true,
+    "internalRuntimeNetwork": true,
+    "buildNetwork": "none",
+    "noPrivileges": true
+  },
+  "closure": {
+    "cleanupOk": true,
+    "quotaReleased": true,
+    "independentLabelInspections": {
+      "containersRemaining": 0,
+      "imagesRemaining": 0,
+      "networksRemaining": 0,
+      "volumesRemaining": 0
+    }
+  },
+  "tests": {
+    "allSandbox": 186,
+    "reviewerFixtureAndLifecycle": 48,
+    "installationFixtures": 30,
+    "staticAcceptance": 45,
+    "configurationValidation": "passed",
+    "modelProfiles": "passed",
+    "installedDistributionCheck": "passed"
+  },
+  "review": {
+    "verdict": "incomplete",
+    "introducedFindings": 0,
+    "remainingAtReviewTime": "real engine smoke and global gates",
+    "coordinatorVerification": "passed after review; reviewer verdict not rewritten"
+  },
+  "externalReports": [
+    "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/isolated-fixture-inputs-fxDLGA/.opencode/state/sandbox/reports/fixture-inputs-negative-09dcb6ce.json",
+    "/private/var/folders/7x/v95hf83s247_fvpjdpdcx1hh0000gn/T/isolated-fixture-inputs-fxDLGA/.opencode/state/sandbox/reports/fixture-inputs-smoke-8d304bee.json"
+  ]
+}

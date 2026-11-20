@@ -51,8 +51,13 @@ declared path that leaves the project is refused: the build context is
 the boundary that keeps the host's content out of the image, so a
 context outside the project would defeat it.
 
-A missing or incomplete declaration is reported as a block. The control
-does not guess.
+Version the declaration with the project's Docker recipe. If it is missing,
+prepare both in source control when the project needs sandbox testing.
+Keep secrets out of committed declarations. Creating or editing these files
+is independent of starting the sandbox.
+
+A missing or incomplete declaration blocks a requested build; the control
+does not generate files during the command.
 
 The lifecycle also accepts an explicit `configPath`, relative to the
 effective checkout root. Paths with spaces are supported; missing explicit
@@ -237,10 +242,18 @@ After installation and a fresh OpenCode session, use:
 ```text
 /sandbox help
 /sandbox release
-/sandbox build .opencode/sandbox.json
-/sandbox rebuild .opencode/sandbox.json
+/sandbox build
+/sandbox rebuild
 /sandbox transfer .devcontainer/compose.yml
 ```
+
+Only a user invocation of the native command can load or replace a sandbox.
+Agent tools for start, build, rebuild and transfer return command guidance.
+Record sandbox checks as not run until the user requests a sandbox.
+
+Build and rebuild use `.opencode/sandbox.json` or `opencode-sandbox.json` in
+the effective checkout. Supply one checkout-relative path to select an
+alternative declaration.
 
 Build requires free quota. Rebuild requires this session's sandbox in the
 same checkout. Transfer explicitly changes ownership from a verified managed
@@ -254,8 +267,8 @@ the destination in `awaiting-start`. The destination starts it through
 command; the control checks the same persistent mapping again. Release closes
 the project's one verified sandbox or Compose application reservation on an
 explicit user/developer request. Both release and transfer ask for their named
-permission. Build/rebuild and transfer accept one literal checkout-relative
-path; for transfer, the reservation scope determines whether it is sandbox
+permission. Build/rebuild accept an optional literal checkout-relative path; transfer
+requires one. For transfer, the reservation scope determines whether it is sandbox
 JSON or a Compose file. Release accepts no operands. The native V2 executor parses before model/tool
 dispatch and records a synthetic session response with queued delivery and
 `resume: false`, visible in the session inbox without waking the agent. Help
@@ -299,6 +312,31 @@ Execution records are retained while resources/secrets are removed and are
 updated atomically, so a failed terminal write remains recoverable. Recovery
 also accepts an already closed provisional successor after verifying its
 report and resource absence; it never restarts a build to repair a journal.
+
+### Release when the worktree API is unavailable
+
+Explicit release can also resolve the active project through Git. If the
+managed source cannot be resolved, the control independently verifies the
+NUL-delimited Git worktree listing and each checkout's common repository.
+Unrecorded checkouts get stable path-derived IDs in release evidence only;
+release never registers, creates or retires a worktree. Corrupt/duplicate
+inventory, unverifiable Git membership or ambiguous Compose resources still
+block. `worktree_reconcile` is observational: repeating it does not register
+an unrecorded checkout.
+
+From a local operator session outside OpenCode, use the same release control:
+
+```sh
+node /path/to/opencode-config/scripts/release-sandbox.mjs --project /path/to/project
+```
+
+This is an explicit release operation, not a dry run. It keeps the operation
+lock, preserves evidence before cleanup, stops/removes only verified container
+IDs, retains volumes and bind data, and frees the reservation only after
+verified absence. It does not impersonate an OpenCode session. The normal
+`/sandbox release` permission remains required inside OpenCode. Build,
+transfer and retirement keep their managed-worktree requirements. One local
+application per project remains the capacity policy.
 
 ### Activation and rollback
 
@@ -370,3 +408,76 @@ closure report in its printed temporary repository. It never pulls an image.
 This probe is not the AT-188 installation/plugin-loading fixture. If its
 OpenCode Linux prerequisite is missing, AT-188 stays blocked; an operator must
 provide an already prepared compatible runtime before the real loading test.
+
+Unrelated Compose containers with missing directory/config labels no longer
+block the whole engine. A different project label and no known target paths
+are required to exclude them; same-project labels, related binds, unsupported
+mounts or malformed inspections remain blocking. Excluded containers are
+never stopped or removed. If managed source resolution succeeds but the
+runtime owner is unrecorded, use the operator CLI for independent Git membership.
+
+## Opt-in fixture input capture
+
+The `isolated-fixture-inputs` change adds `fixtureInputs` for tests whose build
+requires only a small set of source files. Do not reinterpret `include` as a
+selector or add exclusions to silence credential findings.
+
+```json
+{
+  "dockerfile": "fixture/Dockerfile",
+  "context": ".",
+  "stage": "test",
+  "fixtureInputs": ["fixture/Dockerfile", "fixture/test.sh"],
+  "production": { "allowExternalEgress": false },
+  "ports": []
+}
+```
+
+Each entry must be a literal checkout-relative regular file inside the declared
+context. Select the Dockerfile too. Empty selectors, duplicate/ambiguous paths,
+directories, globs, unsafe ancestry, aliases, protected configuration/state and
+simultaneous legacy `include` declarations are refused, not silently omitted.
+The complete selected content is screened before building; selecting a secret
+never grants an exemption. Configuration and input fingerprints identify the
+fixture scope. A passed fixture does not certify files outside that scope.
+Without `fixtureInputs`, the existing full eligible checkout capture remains
+unchanged, including its conservative credential findings.
+
+Fixture ceilings are fixed: 256 files, 1,024 bytes per path, 255 bytes per
+segment, 2 MiB per file and 16 MiB total. Names must be portable normalized
+literals; whitespace and shell/pattern syntax are refused. This mode also
+requires no declared network dependencies, ports or external egress.
+Every external Docker image reference must be a locally inspectable digest;
+dynamic references, remote frontends, ONBUILD, heredocs, RUN mount/network
+overrides and unsupported FROM forms are refused. A missing image blocks
+before build rather than allowing Docker to fetch it. A large WordPress
+artifact is not permission to increase limits or select an installed
+dependency tree; prepare a reviewed compatible pinned fixture image separately.
+
+### Verification and activation
+
+Before using this mode, run the config/capture/lifecycle regression suites,
+profile/configuration checks, acceptance harness and independent security review.
+The first bounded smoke test is `node scripts/probe-fixture-inputs.mjs`. It uses
+the managed lifecycle, a disposable Git fixture and the exact locally cached
+Alpine digest declared in the script. It never pulls a missing image. Its
+external observations must confirm the selected manifest, no host mounts or
+ports, an internal runtime network and successful managed resource closure.
+This is not WordPress acceptance. Do not run it before the implementation
+and independent review gates pass.
+
+Verified checkpoint: the `isolated-fixture-inputs` change's
+`runtime-evidence.json` records a passed managed smoke after review, including
+selected-secret refusal and resource closure. The installed entrypoints already
+link this repository; a fresh direct lifecycle invocation exercised the new code.
+`install.sh --check` passed without writes. This does not attest that an
+already-running OpenCode session has refreshed its cached imports.
+
+Existing installations may link the plugin source directly; editing that source
+can affect later invocations before an installer runs. Keep unrelated work
+intact, do not automatically restart sessions or replay reservations, and
+separately verify installed-state drift with `bash install.sh --check`.
+If a controlled install is needed, use the recorded profile and the reviewed
+installer; do not overwrite foreign configuration. For rollback remove the
+project's opt-in declaration and restore only this change's reviewed control
+files, keeping external reports and resolving active operations first.

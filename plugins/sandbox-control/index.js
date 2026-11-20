@@ -9,7 +9,7 @@
 // produces evidence, it never approves a product, and it never changes
 // the host's Git state.
 
-import { startSandbox, sandboxStatus, finishSandbox, cancelSandbox, recoverSandbox, readReservation } from "./lifecycle.mjs";
+import { sandboxStatus, finishSandbox, cancelSandbox, recoverSandbox, readReservation } from "./lifecycle.mjs";
 import {
   startLocalExecution,
   stopLocalExecution,
@@ -28,11 +28,13 @@ import { reconcileInventory } from "../worktree-control/inventory.mjs";
 import { resolveProjectRoot } from "../worktree-control/paths.mjs";
 import { executeSandboxOperation, recoverSandboxTransition } from "./transition.mjs";
 
-const SANDBOX_DESCRIPTION =
-  "Build and test an independent capture of the work under test in an isolated local Docker container. " +
-  "The tool records evidence; it does not approve a product, it does not claim equivalence with production, " +
-  "and it never modifies the host's branches, publishes code, or opens a pull request. " +
-  "The result states are passed, failed, blocked, and not executed.";
+const operatorCommand = (operation) => (
+  `/sandbox ${operation === "start" ? "build" : operation}${operation === "transfer" ? " <config>" : ""}`
+);
+
+function userRequestRequired(operation) {
+  return { ok: false, blocked: true, reason: `Only the user may invoke ${operatorCommand(operation)}.` };
+}
 
 const RESERVATION_DESCRIPTION =
   "Reserve the single local application slot of the project. The reservation records its owner and its " +
@@ -64,13 +66,16 @@ export const SandboxControlPlugin = async (dependencies = {}) => {
   return {
     tool: {
       ...Object.fromEntries(["release", "build", "rebuild", "transfer"].map((operation) => [`sandbox_${operation}`, {
-        description: `${operation} the sandbox of the verified active work and checkout. Replacement preserves external evidence and verifies closure while holding the project quota; it never approves a product.`,
+        description: operation === "release"
+          ? "Release the sandbox of the verified active work and checkout."
+          : `Direct the user to ${operatorCommand(operation)}. This tool does not load or replace the sandbox.`,
         args: operation === "release" ? {} : operation === "transfer"
           ? { configPath: { type: "string", description: "literal destination Compose file for application handoff, or sandbox JSON path for sandbox replacement, relative to the effective checkout root", required: true } }
-          : { configPath: { type: "string", description: "literal configuration JSON path relative to the effective checkout root", required: true } },
+          : { configPath: { type: "string", description: "Optional configuration path relative to the checkout root" } },
         async execute(args, context) {
           const valid = validateSandboxOperation(operation, args ?? {});
           if (!valid.ok) return valid;
+          if (operation !== "release") return userRequestRequired(operation);
           if (typeof context?.permission?.assert !== "function") return { ok: false, blocked: true, reason: "the session permission API is unavailable" };
           await context.permission.assert({ sessionID: context.sessionID, action: `sandbox_${operation}`, resources: ["*"] });
           return executeSandboxOperation(operation, args, context, dependencies);
@@ -89,7 +94,7 @@ export const SandboxControlPlugin = async (dependencies = {}) => {
       },
 
       sandbox_start: {
-        description: SANDBOX_DESCRIPTION,
+        description: "Direct the user to /sandbox build to load the project.",
         args: {
           workId: { type: "string", description: "the identifier of the work under test", required: true },
           workName: { type: "string", description: "the name of the work, used for the resource names", required: true },
@@ -99,17 +104,8 @@ export const SandboxControlPlugin = async (dependencies = {}) => {
             description: "the maximum duration of the execution; no timeout is applied when it is absent",
           },
         },
-        async execute(args, context) {
-          const cwd = context?.directory ?? currentWorktree();
-          return startSandbox({
-            workId: args?.workId,
-            workName: args?.workName,
-            worktreePath: args?.worktreePath,
-            sessionId: context?.sessionID ?? "",
-            projectID: context?.projectID ?? null,
-            maxDurationSeconds: args?.maxDurationSeconds ?? null,
-            cwd,
-          }, dependencies);
+        async execute() {
+          return userRequestRequired("start");
         },
       },
 

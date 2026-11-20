@@ -2,7 +2,7 @@
 // Production command registration is separate from these testable primitives.
 import { isAbsolute } from "node:path";
 
-export const SANDBOX_USAGE = "/sandbox [help]\n/sandbox release\n/sandbox build <config.json>\n/sandbox rebuild <config.json>\n/sandbox transfer <config>";
+export const SANDBOX_USAGE = "/sandbox [help]\n/sandbox release\n/sandbox build [path]\n/sandbox rebuild [path]\n/sandbox transfer <config>";
 const operations = new Set(["release", "build", "rebuild", "transfer"]);
 const invalid = () => ({ ok: false, reason: "invalid sandbox arguments", usage: SANDBOX_USAGE });
 
@@ -14,6 +14,7 @@ export function validateSandboxOperation(operation, input) {
     return { ok: true, operation, input: {} };
   }
   if (Object.keys(input).some((key) => key !== "configPath")) return invalid();
+  if (operation !== "transfer" && Object.keys(input).length === 0) return { ok: true, operation, input: {} };
   const path = input.configPath;
   if (typeof path !== "string" || !path.trim() || /[\x00-\x1f\x7f\\]/.test(path) ||
       isAbsolute(path) || /^[A-Za-z]:|^-/.test(path) || path.split("/").some((part) => part === "..")) return invalid();
@@ -25,7 +26,7 @@ export function parseSandboxCommand(raw) {
   if (typeof raw !== "string" || /[\x00-\x08\x0a-\x1f\x7f]/.test(raw)) return invalid();
   const text = raw.trim();
   if (!text || text === "help") return { ok: true, help: true, usage: SANDBOX_USAGE };
-  if (text === "release") return validateSandboxOperation("release", {});
+  if (text === "release" || text === "build" || text === "rebuild") return validateSandboxOperation(text, {});
   const match = /^(build|rebuild|transfer)[ \t]+(?:"([^"]*)"|'([^']*)'|([^ \t"']+))$/.exec(text);
   if (!match) return invalid();
   return validateSandboxOperation(match[1], { configPath: match[2] ?? match[3] ?? match[4] });
@@ -55,8 +56,8 @@ export async function registerSandboxCommand(ctx, invoke) {
           await ctx.session.synthetic({ sessionID, text: parsed.ok ? parsed.usage : `${parsed.reason}\n${parsed.usage}`, delivery: "queue", resume: false });
           return;
         }
-        // Commands act directly, so explicitly apply the same named action
-        // rule as their tools before resolving source or touching resources.
+        // The native command carries user intent. Assert the named action
+        // before resolving the source or touching resources.
         await ctx.permission.assert({ sessionID, action: `sandbox_${parsed.operation}`, resources: ["*"] });
         const result = await invoke(parsed.operation, parsed.input, sessionID);
         await ctx.session.synthetic({ sessionID, text: JSON.stringify(result), delivery: "queue", resume: false });

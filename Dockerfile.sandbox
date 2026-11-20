@@ -1,0 +1,10 @@
+FROM ghcr.io/anomalyco/opencode:2.2.7@sha256:7b1e3139a64121d12e572530974a18b9452967fb4d67516d8cfd9c0e763dd57d AS sandbox
+
+WORKDIR /workspace
+COPY plugins/plugin-v2-adapter.mjs .opencode/plugins/plugin-v2-adapter.mjs
+COPY plugins/sandbox-control/ .opencode/plugins/sandbox-control/
+COPY plugins/worktree-control/ .opencode/plugins/worktree-control/
+RUN ln -s sandbox-control/index.js .opencode/plugins/sandbox-control.js \
+    && ln -s worktree-control/index.js .opencode/plugins/worktree-control.js
+
+ENTRYPOINT ["opencode", "serve", "--hostname", "127.0.0.1", "--port", "8080"]

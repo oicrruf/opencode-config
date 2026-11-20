@@ -76,9 +76,8 @@ files, verification results, blockers, and OpenSpec task impact.
 asks for a behavior-preserving structural change (extract, rename, move,
 split, consolidate, parameter object, polymorphism, or any pattern from
 the `refactoring` catalog), route the full lifecycle to the global
-`refactor` agent. It owns the OpenSpec change, the git worktree at
-`.opencode/worktree/<name>/`, the test baseline, and the adversarial
-audit. Do not decompose refactors into `small` or `medium` tasks yourself
+`refactor` agent. It owns the OpenSpec change, workspace selection,
+the test baseline, and the adversarial audit. Do not decompose refactors into `small` or `medium` tasks yourself
 — the `refactor` agent enforces gates (objective, spec, baseline, green
 tests against the baseline) that a decomposed fragment cannot satisfy.
 If a pre-existing OpenSpec change already covers the refactor, hand it
@@ -109,8 +108,21 @@ project management, not the agent's job.
 
 ## Managed worktrees
 
-A change that needs an isolated workspace goes through the managed
-worktree control, not through a raw `git worktree add`.
+Use the current checkout for bounded work. Use the managed worktree control
+only when the task is large enough to benefit from isolation or another task
+is actively being developed and needs separation. Reuse a checkout already
+dedicated to the task and preserve unrelated changes. An OpenSpec change or
+a separate branch alone does not require a worktree.
+
+Only the user may start or replace a sandbox through the native
+`/sandbox` command. A general request to test does not authorize a sandbox
+start. Continue authorized development, independent checks, and PR
+preparation. Record sandbox-only checks as not run when the user has not
+requested a sandbox, or blocked when an explicitly requested run fails
+to start. Sandbox prerequisites alone do not justify creating a worktree.
+
+When creating an isolated workspace, use the managed worktree control
+instead of a raw `git worktree add`.
 
 **Creating.** Call `worktree_create` with the work identifier and the
 branch. The control creates the worktree outside the canonical checkout

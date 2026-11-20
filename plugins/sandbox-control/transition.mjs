@@ -119,7 +119,7 @@ export async function executeSandboxOperation(operation, input, context, deps = 
     if (!replacement.ok) return replacement;
     const successorSaved = persist("successor");
     if (!successorSaved.ok) return { ...successorSaved, executionId: identity.executionId, token: replacement.token };
-    const started = await startSandbox(request, {
+    const started = await startSandbox({ ...request, configPath: config.config.relativePath }, {
       ...deps, expectedConfigurationFingerprint: config.config.fingerprint,
       preparedExecution: { identity, reservation: replacement },
     });

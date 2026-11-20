@@ -36,7 +36,8 @@ import {
 import { execFileSync } from "node:child_process";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { captureRootDir, ensureDir, isInside, canonicalPath } from "./paths.mjs";
-import { screenCapturedFiles } from "./secret-screen.mjs";
+import { screenCapturedFiles, screenValue } from "./secret-screen.mjs";
+import { validateFixtureInputs, readFixtureSnapshot, stageFixtureSnapshot, discardFixtureSnapshot, fixtureIdentity } from "./fixture-inputs.mjs";
 
 /**
  * The paths that are always excluded from a capture. A declared include
@@ -168,6 +169,7 @@ export function listCaptureCandidates(worktreePath, include = [], protectedPaths
  * a build could use.
  */
 export function takeCapture(input) {
+  if (Object.hasOwn(input ?? {}, "fixtureInputs")) return takeFixtureCapture(input);
   const {
     worktreePath,
     workId,
@@ -327,6 +329,106 @@ export function takeCapture(input) {
 }
 
 /**
+ * Exact fixture capture: no walk of the source, no source links, no scanner
+ * exemptions. Its manifest lives in the external execution record, never in
+ * the build context. A missing secure reader is a refusal, not a fallback.
+ */
+function takeFixtureCapture(input) {
+  const { worktreePath, workId, workName, executionId, fixtureInputs,
+    fixtureSourceIdentity, dockerfile, context, configurationFingerprint,
+    protectedPaths = [], cwd = process.cwd() } = input;
+  const valid = validateFixtureInputs(fixtureInputs, {
+    include: input.include, dockerfile, context, protectedPaths,
+  });
+  if (!valid.ok) return valid;
+  if (!worktreePath || !workId || !/^[a-z0-9-]+$/i.test(executionId ?? "")) {
+    return { ok: false, reason: "fixture capture requires safe source and execution identities" };
+  }
+  const root = canonicalPath(worktreePath);
+  const before = readWorktreeIdentity(root);
+  const snapshot = readFixtureSnapshot(root, valid.paths);
+  if (!snapshot.ok) return snapshot;
+  if (fixtureSourceIdentity && fixtureIdentity(snapshot.files) !== fixtureSourceIdentity) {
+    return { ok: false, reason: "fixture inputs changed after configuration validation", inconsistent: true };
+  }
+  // Screen every selected byte, including large/binary-shaped input, without
+  // changing legacy screening policy. Never persist raw refusal values.
+  if (snapshot.files.some((file) => screenValue(file.bytes.toString("utf8")))) {
+    return { ok: false, reason: "the fixture capture was refused: selected bytes contain a credential-shaped value" };
+  }
+  const destinationRoot = captureRootDir(cwd);
+  if (!destinationRoot.ok) return destinationRoot;
+  const ensured = ensureDir(destinationRoot.dir);
+  if (!ensured.ok) return ensured;
+  const destination = join(destinationRoot.dir, executionId);
+  if (existsSync(destination)) return { ok: false, reason: "the fixture capture destination already exists" };
+  try {
+    if (!stageFixtureSnapshot(destinationRoot.dir, executionId, snapshot.files)) {
+      return { ok: false, reason: "fixture staging could not be safely completed", cleanupPending: true };
+    }
+    const staged = readFixtureSnapshot(destination, valid.paths);
+    if (!staged.ok) throw new Error("unverifiable staging");
+    input.onBeforeCompare?.();
+    const after = readFixtureSnapshot(root, valid.paths);
+    const gitAfter = readWorktreeIdentity(root);
+    if (!after.ok || fixtureIdentity(after.files) !== fixtureIdentity(snapshot.files) ||
+        before.head !== gitAfter.head || before.branch !== gitAfter.branch) {
+      throw new Error("source drift");
+    }
+    const manifest = {
+      version: 1, mode: "fixture-inputs", workId, workName: workName ?? workId,
+      executionId, repository: root, branch: gitAfter.branch, head: gitAfter.head,
+      configurationFingerprint, selectedPaths: valid.paths,
+      captureIdentity: fixtureIdentity(staged.files),
+      takenAt: new Date().toISOString(), deletions: [],
+      files: snapshot.files.map(({ bytes, ...file }) => ({ ...file, kind: "file" })),
+    };
+    const verified = verifyFixtureCapture(destination, manifest);
+    if (!verified.ok) throw new Error("capture drift");
+    return { ok: true, destination, manifest };
+  } catch {
+    const cleaned = discardFixtureSnapshot(destinationRoot.dir, executionId);
+    return { ok: false, reason: "fixture source or capture changed or became unverifiable", inconsistent: true, cleanupPending: !cleaned };
+  }
+}
+
+export function verifyFixtureSource(manifest) {
+  const snapshot = readFixtureSnapshot(manifest.repository, manifest.selectedPaths);
+  return snapshot.ok && fixtureIdentity(snapshot.files) === fixtureIdentity(manifest.files)
+    ? { ok: true } : { ok: false, reason: "fixture source changed or became unverifiable before build" };
+}
+
+export function verifyFixtureCapture(destination, manifest) {
+  try {
+    // Reject added files and directories as well as mutations and aliases.
+    const allowed = new Set(manifest.selectedPaths);
+    const directories = new Set([""]);
+    for (const path of allowed) {
+      let parent = dirname(path);
+      while (parent !== ".") { directories.add(parent); parent = dirname(parent); }
+    }
+    const walk = (dir, rel = "") => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = rel ? `${rel}/${entry.name}` : entry.name;
+        if (entry.isDirectory() && directories.has(path)) walk(join(dir, entry.name), path);
+        else if (!entry.isFile() || !allowed.has(path)) throw new Error("unexpected entry");
+      }
+    };
+    walk(destination);
+    const snapshot = readFixtureSnapshot(destination, manifest.selectedPaths);
+    if (!snapshot.ok || fixtureIdentity(snapshot.files) !== manifest.captureIdentity || snapshot.files.some((file, index) =>
+      file.fingerprint !== manifest.files[index]?.fingerprint ||
+      file.path !== manifest.files[index]?.path ||
+      file.mode !== manifest.files[index]?.mode || file.size !== manifest.files[index]?.size)) {
+      throw new Error("capture differs");
+    }
+    return { ok: true, manifest };
+  } catch {
+    return { ok: false, reason: "the fixture capture does not match its screened manifest" };
+  }
+}
+
+/**
  * Hash a file. The fingerprint identifies the content that was tested.
  */
 export function hashFile(path) {
@@ -377,7 +479,8 @@ export function compareInventories(before, after) {
 /**
  * Verify a capture against its manifest.
  */
-export function verifyCapture(destination) {
+export function verifyCapture(destination, expectedManifest = null) {
+  if (expectedManifest?.mode === "fixture-inputs") return verifyFixtureCapture(destination, expectedManifest);
   const manifestPath = join(destination, ".opencode-sandbox-capture.json");
   if (!existsSync(manifestPath)) {
     return { ok: false, reason: "the capture has no manifest" };

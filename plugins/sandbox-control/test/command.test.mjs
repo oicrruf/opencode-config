@@ -41,7 +41,7 @@ test("quotes group spaces without expansion or shell interpretation", () => {
 test("invalid invocations cannot call any handler", async () => {
   let calls = 0;
   const handlers = { release() { calls++; }, build() { calls++; }, rebuild() { calls++; }, transfer() { calls++; } };
-  for (const raw of [undefined, null, 4, {}, "status", "BUILD cfg.json", "help extra", "release extra", "release --force", "release cfg.json", "build", "build --flag", "build --config cfg.json",
+  for (const raw of [undefined, null, 4, {}, "status", "BUILD cfg.json", "help extra", "release extra", "release --force", "release cfg.json", "transfer", "build --flag", "build --config cfg.json",
     "build cfg.json extra", "rebuild a b", "transfer a b", "transfer --force", "transfer \"unfinished", "build 'unfinished", "build a\"b\"", 'build "a"b', "build ''", 'build " "',
     "build /absolute.json", "build ../outside.json", "build a/../../outside.json", "build C:/config.json", "build C:\\config.json",
     "build a\ntransfer b", "build a\r", "build a\0", 'build "a\tb"']) {
@@ -54,7 +54,7 @@ test("direct tool input rejects caller authority and extra fields", () => {
   for (const field of ["workId", "worktreePath", "sessionId", "token", "cwd", "projectID", "operation"]) {
     assert.equal(validateSandboxOperation("transfer", { configPath: "cfg.json", [field]: "forged" }).ok, false);
   }
-  for (const value of [null, [], {}, { configPath: false }, { configPath: "../x" }]) {
+  for (const value of [null, [], { configPath: undefined }, { configPath: false }, { configPath: "../x" }]) {
     assert.equal(validateSandboxOperation("build", value).ok, false);
   }
   assert.equal(validateSandboxOperation("start", { configPath: "cfg.json" }).ok, false);
@@ -80,7 +80,7 @@ test("native V2 help/invalid input replies without model, permission or operatio
   };
   await registerSandboxCommand(ctx, async () => { mutations++; throw Error("must never execute"); });
   assert.equal(command.name, "sandbox");
-  for (const raw of ["", "help", "help extra", "bad", "build", 'build "unterminated', "transfer a b"]) {
+  for (const raw of ["", "help", "help extra", "bad", "transfer", 'build "unterminated', "transfer a b"]) {
     await command.execute({ sessionID: "session", prompt: { text: raw } });
   }
   assert.equal(replies.length, 7);
@@ -103,4 +103,9 @@ test("native V2 valid dispatch asserts the operation permission before side effe
   ctx.permission.assert = async () => { throw Error("denied"); };
   await assert.rejects(command.execute({ sessionID: "session", prompt: { text: "build cfg.json" } }), /denied/);
   assert.equal(events.length, 3);
+  ctx.permission.assert = async (input) => { events.push(input.action); };
+  for (const operation of ["build", "rebuild"]) {
+    await command.execute({ sessionID: "session", prompt: { text: operation } });
+    assert.deepEqual(events.slice(-3), [`sandbox_${operation}`, [operation, {}, "session"], '{"ok":true}']);
+  }
 });

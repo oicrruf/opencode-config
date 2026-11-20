@@ -162,3 +162,18 @@ test("persistent data comparison requires exact bind sources and named volumes",
     expected.mounts[0], { ...expected.mounts[1], source: "/tmp/other/uploads" },
   ] }), false);
 });
+
+test("foreign Compose containers without directory labels do not block the owned project", () => {
+  const owned = container(idA, "web", [{ Type: "bind", Source: WORK, Destination: "/app", RW: true }]);
+  const foreign = { ...container(idB, "foreign", [{ Type: "bind", Source: "/tmp/foreign", Destination: "/app", RW: true }]),
+    project: "foreign-project", workingDirectory: null, configFiles: null };
+  const input = { projectRoot: ROOT, workId: "feature-a", worktreePath: WORK, worktreeVerified: true, engineId: "fixture-daemon" };
+  const result = discoverComposeProject(dockerFor([owned, foreign]), input);
+  assert.equal(result.ok, true, result.reason);
+  assert.deepEqual(result.manifest.containers.map((c) => c.id), [idA]);
+  for (const suspicious of [ { ...foreign, project: PROJECT }, { ...foreign, mounts: owned.mounts },
+    { ...foreign, workingDirectory: ROOT }, { ...foreign, configFiles: CONFIG },
+    { ...foreign, mounts: [{ Type: "unknown" }] } ]) {
+    assert.equal(discoverComposeProject(dockerFor([owned, suspicious]), input).blocked, true);
+  }
+});

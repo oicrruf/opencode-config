@@ -37,7 +37,7 @@ function canonicalPath(path) {
  * created a worktree. An unreadable inventory is reported, because a
  * corrupted record must not be mistaken for an empty one.
  */
-export function readInventory(root) {
+export function readInventory(root, options = {}) {
   const safe = checkStatePath(root, ["inventory.json"], "file");
   if (!safe.ok) {
     return { ok: false, reason: safe.reason, entries: [], missing: false, unsafePath: true };
@@ -48,6 +48,9 @@ export function readInventory(root) {
   }
   try {
     const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (options.strict && (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.entries))) {
+      return { ok: false, reason: "the inventory has an invalid entries schema", entries: [], missing: false };
+    }
     const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
     return { ok: true, entries, missing: false };
   } catch (err) {

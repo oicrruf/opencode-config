@@ -34,11 +34,12 @@ function fixture(t) {
 
 test("build binds work, source, session and generation; a second build stays blocked", async (t) => {
   const f = fixture(t);
-  const started = await f.request("build");
+  const started = await executeSandboxOperation("build", {}, f.context, f.deps);
   assert.equal(started.ok, true, started.reason);
   assert.equal(started.execution.sessionId, "session-one");
   assert.equal(started.execution.projectID, "project");
   assert.equal(started.execution.source.checkout, f.dir);
+  assert.equal(started.execution.configuration.path, f.configPath);
   const generation = readReservation(f.dir).reservation.generation;
   assert.equal(started.execution.generation, generation);
   f.calls.length = 0;
@@ -55,7 +56,7 @@ test("rebuild preserves report and continuous reservation, then starts a distinc
     observations.push({ args, reservation: readReservation(f.dir).reservation });
     return "";
   });
-  const second = await f.request("rebuild", {}, deps);
+  const second = await executeSandboxOperation("rebuild", {}, f.context, deps);
   assert.equal(second.ok, true, second.reason);
   assert.notEqual(second.execution.executionId, oldId);
   assert.notEqual(second.token, first.token);
@@ -67,6 +68,30 @@ test("rebuild preserves report and continuous reservation, then starts a distinc
   assert.equal(readTransition(f.dir).transition.phase, "running");
   assert.equal(verifyOwner(f.dir, first.token).ok, false);
   assert.equal(finishSandbox(f.dir, oldId, { result: "passed", token: second.token }, deps).ok, false);
+});
+
+test("a missing default configuration prevents build and preserves an active sandbox on rebuild", async (t) => {
+  const f = fixture(t);
+  const configFile = join(f.dir, f.configPath);
+  rmSync(configFile);
+  const missingBuild = await executeSandboxOperation("build", {}, f.context, f.deps);
+  assert.equal(missingBuild.ok, false);
+  assert.match(missingBuild.reason, /declares no sandbox configuration/);
+  assert.deepEqual(f.calls, []);
+  assert.equal(readReservation(f.dir).state, "free");
+
+  const fallbackPath = "opencode-sandbox.json";
+  writeFileSync(join(f.dir, fallbackPath), JSON.stringify(f.config));
+  const first = await executeSandboxOperation("build", {}, f.context, f.deps);
+  assert.equal(first.ok, true, first.reason);
+  assert.equal(first.execution.configuration.path, fallbackPath);
+  rmSync(join(f.dir, fallbackPath));
+  f.calls.length = 0;
+  const missingRebuild = await executeSandboxOperation("rebuild", {}, f.context, f.deps);
+  assert.equal(missingRebuild.ok, false);
+  assert.match(missingRebuild.reason, /declares no sandbox configuration/);
+  assert.equal(readReservation(f.dir).reservation.executionId, first.execution.executionId);
+  assert.deepEqual(f.calls, []);
 });
 
 test("another session must explicitly transfer and never provides the old token", async (t) => {

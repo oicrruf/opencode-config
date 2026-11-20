@@ -41,7 +41,7 @@ export default {
         stage = 'session';
         const session = await ctx.session.create({ title: 'AT-200 native command verification' });
         stage = 'commands';
-        const inputs = ['', 'help', 'help extra', 'unknown', 'build', 'build "unfinished', 'transfer a b', 'build ../outside.json'];
+        const inputs = ['', 'help', 'help extra', 'unknown', 'transfer', 'build "unfinished', 'transfer a b', 'build ../outside.json'];
         for (const text of inputs) await ctx.session.command({ sessionID: session.id, name: 'sandbox', text });
         stage = 'context';
         const messages = await ctx.session.context({ sessionID: session.id });
@@ -52,7 +52,7 @@ export default {
         const inbox = await inboxResponse.json();
         const serialized = JSON.stringify({ messages, inbox });
         console.log(`AT200_COMMAND_PROOF ${JSON.stringify({ count: inputs.length, toolCalls, modelCalls,
-          usageSeen: serialized.includes('/sandbox build <config.json>'), invalidSeen: serialized.includes('invalid sandbox arguments'),
+          usageSeen: serialized.includes('/sandbox build [path]'), invalidSeen: serialized.includes('invalid sandbox arguments'),
           messageCount: Array.isArray(messages) ? messages.length : null,
           syntheticSeen: serialized.includes('"type":"synthetic"'),
           responseScope: 'canonical context and pending synthetic inbox',

@@ -5,16 +5,23 @@ sandbox-control. The native executor parses arguments before a model prompt
 or tool call, enforces the operation's permission, and uses the verified
 session and managed work identity.
 
+The user starts or replaces a sandbox by invoking the native command.
+Agent tools for start, build, rebuild and transfer return command guidance.
+General implementation or test requests do not start a sandbox.
+
 Supported syntax:
 
 - `/sandbox` or `/sandbox help`
 - `/sandbox release`
-- `/sandbox build <config.json>`
-- `/sandbox rebuild <config.json>`
+- `/sandbox build`
+- `/sandbox rebuild`
 - `/sandbox transfer <config>` (sandbox replacement or application handoff)
 
 Release accepts no operands and explicitly closes the one verified project
-reservation. Build/rebuild accept exactly one literal checkout-relative path.
+reservation. Build and rebuild read the effective checkout's declared sandbox
+configuration. They look for `.opencode/sandbox.json` first, then
+`opencode-sandbox.json`. An optional checkout-relative path selects a different
+configuration. If no declaration exists, the command reports it and stops.
 Transfer requires one checkout-relative path. For a sandbox it is the sandbox
 JSON configuration. For an application it is the destination Compose file;
 the control compares the destination's rendered persistent mounts before it
